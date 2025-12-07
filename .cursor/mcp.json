@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "claude_code": {
+      "command": "node",
+      "args": [
+        ".cursor/tools/claude-code/server.js"
+      ]
+    }
+  }
+}
