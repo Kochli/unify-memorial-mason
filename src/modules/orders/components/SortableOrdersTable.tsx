@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/components/ui/table";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
-import { ArrowUpDown, ArrowUp, ArrowDown, GripVertical, AlertTriangle } from 'lucide-react';
+import { ArrowUpDown, ArrowUp, ArrowDown, GripVertical, AlertTriangle, Edit, Trash2 } from 'lucide-react';
 
 interface Order {
   id: string;
@@ -35,9 +35,11 @@ interface SortableOrdersTableProps {
   orders: Order[];
   onOrderUpdate?: (orderId: string, updates: Partial<Order>) => void;
   onViewOrder?: (order: Order) => void;
+  onEditOrder?: (order: Order) => void;
+  onDeleteOrder?: (order: Order) => void;
 }
 
-export const SortableOrdersTable: React.FC<SortableOrdersTableProps> = ({ orders, onOrderUpdate, onViewOrder }) => {
+export const SortableOrdersTable: React.FC<SortableOrdersTableProps> = ({ orders, onOrderUpdate, onViewOrder, onEditOrder, onDeleteOrder }) => {
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
   const [columnOrder] = useState([
     'id', 'customer', 'type', 'stoneStatus', 'progress', 'depositDate', 'installationDate', 'dueDate', 'value'
@@ -66,6 +68,7 @@ export const SortableOrdersTable: React.FC<SortableOrdersTableProps> = ({ orders
   };
 
   const getDaysUntilDue = (dueDate: string) => {
+    if (!dueDate) return Infinity;
     const today = new Date();
     const due = new Date(dueDate);
     const diffTime = due.getTime() - today.getTime();
@@ -228,15 +231,35 @@ export const SortableOrdersTable: React.FC<SortableOrdersTableProps> = ({ orders
                   }
                 })}
                 <TableCell>
-                  <div className="space-x-2">
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => onViewOrder?.(order)}
-                    >
-                      View
-                    </Button>
-                    <Button variant="outline" size="sm">Edit</Button>
+                  <div className="flex items-center gap-2">
+                    {onViewOrder && (
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => onViewOrder(order)}
+                      >
+                        View
+                      </Button>
+                    )}
+                    {onEditOrder && (
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => onEditOrder(order)}
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {onDeleteOrder && (
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => onDeleteOrder(order)}
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
                 </TableCell>
               </TableRow>

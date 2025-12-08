@@ -1,52 +1,34 @@
-
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/components/ui/tabs";
 import { Input } from "@/shared/components/ui/input";
-import { Search, Plus, Download, Send, Eye, AlertCircle, DollarSign, TrendingUp } from 'lucide-react';
+import { Search, Plus, Download, Send, Eye, AlertCircle, DollarSign, TrendingUp, Edit, Trash2 } from 'lucide-react';
+import { useInvoicesList } from '../hooks/useInvoices';
+import { transformInvoicesForUI, type UIInvoice } from '../utils/invoiceTransform';
+import { CreateInvoiceDrawer } from '../components/CreateInvoiceDrawer';
+import { EditInvoiceDrawer } from '../components/EditInvoiceDrawer';
+import { DeleteInvoiceDialog } from '../components/DeleteInvoiceDialog';
+import type { Invoice } from '../types/invoicing.types';
 
 export const InvoicingPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [createDrawerOpen, setCreateDrawerOpen] = useState(false);
+  const [editDrawerOpen, setEditDrawerOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [invoiceToEdit, setInvoiceToEdit] = useState<Invoice | null>(null);
+  const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
 
-  const invoices = [
-    {
-      id: "INV-001",
-      orderId: "ORD-001",
-      customer: "John Smith",
-      amount: "$2,500.00",
-      status: "paid",
-      dueDate: "2025-06-01",
-      issueDate: "2025-05-15",
-      paymentMethod: "Credit Card",
-      daysOverdue: 0
-    },
-    {
-      id: "INV-002",
-      orderId: "ORD-002",
-      customer: "Sarah Johnson",
-      amount: "$3,800.00",
-      status: "pending",
-      dueDate: "2025-06-05",
-      issueDate: "2025-05-20",
-      paymentMethod: "Bank Transfer",
-      daysOverdue: 0
-    },
-    {
-      id: "INV-003",
-      orderId: "ORD-003",
-      customer: "Mike Brown",
-      amount: "$1,200.00",
-      status: "overdue",
-      dueDate: "2025-05-25",
-      issueDate: "2025-05-10",
-      paymentMethod: "Check",
-      daysOverdue: 5
-    }
-  ];
+  const { data: invoicesData, isLoading, error } = useInvoicesList();
+
+  // Transform invoices from DB format to UI format
+  const uiInvoices = useMemo(() => {
+    if (!invoicesData) return [];
+    return transformInvoicesForUI(invoicesData);
+  }, [invoicesData]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -54,27 +36,80 @@ export const InvoicingPage: React.FC = () => {
       case "pending": return "bg-yellow-100 text-yellow-700";
       case "overdue": return "bg-red-100 text-red-700";
       case "draft": return "bg-gray-100 text-gray-700";
+      case "cancelled": return "bg-gray-100 text-gray-700";
       default: return "bg-gray-100 text-gray-700";
     }
   };
 
-  const filteredInvoices = invoices.filter(invoice => {
-    const matchesTab = activeTab === "all" || invoice.status === activeTab;
-    const matchesSearch = searchQuery === "" || 
-                         invoice.customer.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         invoice.id.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesTab && matchesSearch;
-  });
+  const filteredInvoices = useMemo(() => {
+    if (!uiInvoices) return [];
+    return uiInvoices.filter(invoice => {
+      const matchesTab = activeTab === "all" || invoice.status === activeTab;
+      const matchesSearch = searchQuery === "" || 
+                           invoice.customer.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                           invoice.invoiceNumber.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesTab && matchesSearch;
+    });
+  }, [uiInvoices, activeTab, searchQuery]);
 
-  const totalOutstanding = invoices
-    .filter(inv => inv.status !== "paid")
-    .reduce((sum, inv) => sum + parseFloat(inv.amount.replace('$', '').replace(',', '')), 0);
+  const stats = useMemo(() => {
+    if (!uiInvoices) {
+      return { totalOutstanding: 0, totalPaid: 0, overdueCount: 0, collectionRate: 0 };
+    }
+    
+    const totalOutstanding = uiInvoices
+      .filter(inv => inv.status !== "paid" && inv.status !== "cancelled")
+      .reduce((sum, inv) => {
+        const amount = parseFloat(inv.amount.replace('$', '').replace(/,/g, ''));
+        return sum + (isNaN(amount) ? 0 : amount);
+      }, 0);
 
-  const totalPaid = invoices
-    .filter(inv => inv.status === "paid")
-    .reduce((sum, inv) => sum + parseFloat(inv.amount.replace('$', '').replace(',', '')), 0);
+    const totalPaid = uiInvoices
+      .filter(inv => inv.status === "paid")
+      .reduce((sum, inv) => {
+        const amount = parseFloat(inv.amount.replace('$', '').replace(/,/g, ''));
+        return sum + (isNaN(amount) ? 0 : amount);
+      }, 0);
 
-  const overdueCount = invoices.filter(inv => inv.status === "overdue").length;
+    const overdueCount = uiInvoices.filter(inv => inv.status === "overdue").length;
+    
+    const totalAmount = uiInvoices.reduce((sum, inv) => {
+      const amount = parseFloat(inv.amount.replace('$', '').replace(/,/g, ''));
+      return sum + (isNaN(amount) ? 0 : amount);
+    }, 0);
+
+    const collectionRate = totalAmount > 0 ? Math.round((totalPaid / totalAmount) * 100) : 0;
+
+    return { totalOutstanding, totalPaid, overdueCount, collectionRate };
+  }, [uiInvoices]);
+
+  const handleEditInvoice = (invoice: UIInvoice) => {
+    // Find the original DB invoice by ID
+    const dbInvoice = invoicesData?.find((inv) => inv.id === invoice.id);
+    if (dbInvoice) {
+      setInvoiceToEdit(dbInvoice);
+      setEditDrawerOpen(true);
+    }
+  };
+
+  const handleDeleteInvoice = (invoice: UIInvoice) => {
+    // Find the original DB invoice by ID
+    const dbInvoice = invoicesData?.find((inv) => inv.id === invoice.id);
+    if (dbInvoice) {
+      setInvoiceToDelete(dbInvoice);
+      setDeleteDialogOpen(true);
+    }
+  };
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <div className="text-red-600">
+          Error loading invoices: {error instanceof Error ? error.message : 'Unknown error'}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -90,7 +125,7 @@ export const InvoicingPage: React.FC = () => {
             <Download className="h-4 w-4 mr-2" />
             Export
           </Button>
-          <Button>
+          <Button onClick={() => setCreateDrawerOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />
             Create Invoice
           </Button>
@@ -102,7 +137,7 @@ export const InvoicingPage: React.FC = () => {
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-2xl font-bold">${totalOutstanding.toLocaleString()}</div>
+                <div className="text-2xl font-bold">${stats.totalOutstanding.toLocaleString()}</div>
                 <p className="text-sm text-slate-600">Outstanding</p>
               </div>
               <div className="h-8 w-8 bg-yellow-100 rounded-full flex items-center justify-center">
@@ -115,7 +150,7 @@ export const InvoicingPage: React.FC = () => {
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-2xl font-bold text-red-600">{overdueCount}</div>
+                <div className="text-2xl font-bold text-red-600">{stats.overdueCount}</div>
                 <p className="text-sm text-slate-600">Overdue Invoices</p>
               </div>
               <div className="h-8 w-8 bg-red-100 rounded-full flex items-center justify-center">
@@ -128,7 +163,7 @@ export const InvoicingPage: React.FC = () => {
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-2xl font-bold text-green-600">${totalPaid.toLocaleString()}</div>
+                <div className="text-2xl font-bold text-green-600">${stats.totalPaid.toLocaleString()}</div>
                 <p className="text-sm text-slate-600">Paid This Month</p>
               </div>
               <div className="h-8 w-8 bg-green-100 rounded-full flex items-center justify-center">
@@ -141,7 +176,7 @@ export const InvoicingPage: React.FC = () => {
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-2xl font-bold">96%</div>
+                <div className="text-2xl font-bold">{stats.collectionRate}%</div>
                 <p className="text-sm text-slate-600">Collection Rate</p>
               </div>
               <div className="h-8 w-8 bg-blue-100 rounded-full flex items-center justify-center">
@@ -178,64 +213,119 @@ export const InvoicingPage: React.FC = () => {
               <CardTitle>Invoices</CardTitle>
             </CardHeader>
             <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Invoice ID</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Due Date</TableHead>
-                    <TableHead>Payment Method</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredInvoices.map((invoice) => (
-                    <TableRow key={invoice.id} className="hover:bg-slate-50">
-                      <TableCell className="font-medium">{invoice.id}</TableCell>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">{invoice.customer}</div>
-                          <div className="text-sm text-slate-500">Order: {invoice.orderId}</div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-medium">{invoice.amount}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Badge className={getStatusColor(invoice.status)}>
-                            {invoice.status}
-                          </Badge>
-                          {invoice.status === "overdue" && (
-                            <span className="text-xs text-red-600">
-                              {invoice.daysOverdue} days
-                            </span>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>{invoice.dueDate}</TableCell>
-                      <TableCell>{invoice.paymentMethod}</TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button variant="outline" size="sm">
-                            <Eye className="h-3 w-3" />
-                          </Button>
-                          <Button variant="outline" size="sm">
-                            <Send className="h-3 w-3" />
-                          </Button>
-                          <Button variant="outline" size="sm">
-                            <Download className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      </TableCell>
+              {isLoading ? (
+                <div className="text-center py-8 text-slate-600">Loading invoices...</div>
+              ) : filteredInvoices.length === 0 ? (
+                <div className="text-center py-8 text-slate-600">
+                  {searchQuery ? 'No invoices match your search.' : 'No invoices found.'}
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Invoice Number</TableHead>
+                      <TableHead>Customer</TableHead>
+                      <TableHead>Amount</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Due Date</TableHead>
+                      <TableHead>Payment Method</TableHead>
+                      <TableHead>Actions</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredInvoices.map((invoice) => (
+                      <TableRow key={invoice.id} className="hover:bg-slate-50">
+                        <TableCell className="font-medium">{invoice.invoiceNumber}</TableCell>
+                        <TableCell>
+                          <div>
+                            <div className="font-medium">{invoice.customer}</div>
+                            {invoice.orderId && (
+                              <div className="text-sm text-slate-500">Order: {invoice.orderId.substring(0, 8)}...</div>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-medium">{invoice.amount}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <Badge className={getStatusColor(invoice.status)}>
+                              {invoice.status}
+                            </Badge>
+                            {invoice.status === "overdue" && (
+                              <span className="text-xs text-red-600">
+                                {invoice.daysOverdue} days
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>{invoice.dueDate}</TableCell>
+                        <TableCell>{invoice.paymentMethod || 'N/A'}</TableCell>
+                        <TableCell>
+                          <div className="flex gap-1">
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => handleEditInvoice(invoice)}
+                            >
+                              <Edit className="h-3 w-3" />
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => handleDeleteInvoice(invoice)}
+                              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                            <Button variant="outline" size="sm">
+                              <Eye className="h-3 w-3" />
+                            </Button>
+                            <Button variant="outline" size="sm">
+                              <Send className="h-3 w-3" />
+                            </Button>
+                            <Button variant="outline" size="sm">
+                              <Download className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Create Invoice Drawer */}
+      <CreateInvoiceDrawer
+        open={createDrawerOpen}
+        onOpenChange={setCreateDrawerOpen}
+      />
+
+      {/* Edit Invoice Drawer */}
+      {invoiceToEdit && (
+        <EditInvoiceDrawer
+          open={editDrawerOpen}
+          onOpenChange={(open) => {
+            setEditDrawerOpen(open);
+            if (!open) setInvoiceToEdit(null);
+          }}
+          invoice={invoiceToEdit}
+        />
+      )}
+
+      {/* Delete Invoice Dialog */}
+      {invoiceToDelete && (
+        <DeleteInvoiceDialog
+          open={deleteDialogOpen}
+          onOpenChange={(open) => {
+            setDeleteDialogOpen(open);
+            if (!open) setInvoiceToDelete(null);
+          }}
+          invoice={invoiceToDelete}
+        />
+      )}
     </div>
   );
 };

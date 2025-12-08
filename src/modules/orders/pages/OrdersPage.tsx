@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/components/ui/tabs";
@@ -6,86 +6,58 @@ import { Input } from "@/shared/components/ui/input";
 import { Search, Plus, Filter, Calendar, MapPin, Clock, AlertTriangle, Settings } from 'lucide-react';
 import { SortableOrdersTable } from "../components/SortableOrdersTable";
 import { OrderDetailsSidebar } from "../components/OrderDetailsSidebar";
-
-// Demo data - will be replaced with real Supabase queries
-const orders = [
-  {
-    id: "ORD-001",
-    customer: "John Smith",
-    type: "Granite Headstone",
-    stoneStatus: "Ordered",
-    permitStatus: "approved",
-    proofStatus: "In_Progress",
-    dueDate: "2025-06-15",
-    depositDate: "2025-05-20",
-    secondPaymentDate: "2025-06-01",
-    installationDate: "2025-06-12",
-    value: "£2,500",
-    location: "Oak Hill Cemetery",
-    progress: 65,
-    assignedTo: "Mike Johnson",
-    priority: "high",
-    sku: "GH-001-BLK",
-    material: "Black Granite",
-    color: "Jet Black",
-    timelineWeeks: 18
-  },
-  {
-    id: "ORD-002",
-    customer: "Sarah Johnson",
-    type: "Marble Memorial",
-    stoneStatus: "In Stock",
-    permitStatus: "approved",
-    proofStatus: "Lettered",
-    dueDate: "2025-06-10",
-    depositDate: "2025-05-15",
-    secondPaymentDate: "2025-05-30",
-    installationDate: "2025-06-08",
-    value: "£3,800",
-    location: "Greenwood Memorial",
-    progress: 95,
-    assignedTo: "Sarah Davis",
-    priority: "medium",
-    sku: "MM-002-WHT",
-    material: "Carrara Marble",
-    color: "Pure White",
-    timelineWeeks: 20
-  },
-  {
-    id: "ORD-003",
-    customer: "Mike Brown",
-    type: "Bronze Plaque",
-    stoneStatus: "NA",
-    permitStatus: "form_sent",
-    proofStatus: "Not_Received",
-    dueDate: "2025-06-20",
-    depositDate: "2025-05-25",
-    secondPaymentDate: null,
-    installationDate: null,
-    value: "£1,200",
-    location: "Sunset Cemetery",
-    progress: 25,
-    assignedTo: "Tom Wilson",
-    priority: "low",
-    sku: "BP-003-BRZ",
-    material: "Cast Bronze",
-    color: "Antique Bronze",
-    timelineWeeks: 12
-  }
-];
+import { CreateOrderDrawer } from "../components/CreateOrderDrawer";
+import { EditOrderDrawer } from "../components/EditOrderDrawer";
+import { DeleteOrderDialog } from "../components/DeleteOrderDialog";
+import { useOrdersList } from "@/modules/orders/hooks/useOrders";
+import { transformOrdersForUI, type UIOrder } from "../utils/orderTransform";
+import type { Order } from "../types/orders.types";
 
 export const OrdersPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<"table" | "kanban">("table");
-  const [selectedOrder, setSelectedOrder] = useState<any>(null);
-  
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [createDrawerOpen, setCreateDrawerOpen] = useState(false);
+  const [editDrawerOpen, setEditDrawerOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [orderToEdit, setOrderToEdit] = useState<Order | null>(null);
+  const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
+
+  const { data: ordersData, isLoading, error } = useOrdersList();
+
+  // Transform orders from DB format to UI format
+  const uiOrders = useMemo(() => {
+    if (!ordersData) return [];
+    return transformOrdersForUI(ordersData);
+  }, [ordersData]);
+
   const handleOrderUpdate = (orderId: string, updates: Partial<any>) => {
     console.log('Updating order:', orderId, updates);
-    setSelectedOrder(updates);
+    // The update is handled by TanStack Query, so we just need to close the sidebar
+    setSelectedOrder(null);
+  };
+
+  const handleEditOrder = (order: UIOrder) => {
+    // Find the original DB order by ID
+    const dbOrder = ordersData?.find((o) => o.id === order.id);
+    if (dbOrder) {
+      setOrderToEdit(dbOrder);
+      setEditDrawerOpen(true);
+    }
+  };
+
+  const handleDeleteOrder = (order: UIOrder) => {
+    // Find the original DB order by ID
+    const dbOrder = ordersData?.find((o) => o.id === order.id);
+    if (dbOrder) {
+      setOrderToDelete(dbOrder);
+      setDeleteDialogOpen(true);
+    }
   };
 
   const getDaysUntilDue = (dueDate: string) => {
+    if (!dueDate) return Infinity;
     const today = new Date();
     const due = new Date(dueDate);
     const diffTime = due.getTime() - today.getTime();
@@ -93,23 +65,41 @@ export const OrdersPage: React.FC = () => {
     return diffDays;
   };
 
-  const filteredOrders = orders.filter(order => {
-    const matchesTab = activeTab === "all" || 
-                      (activeTab === "overdue" && getDaysUntilDue(order.dueDate) < 0) ||
-                      (activeTab === "pending" && (order.permitStatus === "pending" || order.permitStatus === "form_sent" || order.proofStatus === "Not_Received")) ||
-                      order.stoneStatus === activeTab || order.permitStatus === activeTab || order.proofStatus === activeTab;
-    const matchesSearch = searchQuery === "" || 
-                         order.customer.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         order.id.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesTab && matchesSearch;
-  });
+  const filteredOrders = useMemo(() => {
+    if (!uiOrders) return [];
+    return uiOrders.filter(order => {
+      const matchesTab = activeTab === "all" || 
+                        (activeTab === "overdue" && order.dueDate && getDaysUntilDue(order.dueDate) < 0) ||
+                        (activeTab === "pending" && (order.permitStatus === "pending" || order.permitStatus === "form_sent" || order.proofStatus === "Not_Received")) ||
+                        order.stoneStatus === activeTab || order.permitStatus === activeTab || order.proofStatus === activeTab;
+      const matchesSearch = searchQuery === "" || 
+                           order.customer.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                           order.id.toLowerCase().includes(searchQuery.toLowerCase());
+      return matchesTab && matchesSearch;
+    });
+  }, [uiOrders, activeTab, searchQuery]);
 
-  const stats = {
-    total: orders.length,
-    pending: orders.filter(o => o.permitStatus === "pending" || o.permitStatus === "form_sent" || o.proofStatus === "Not_Received").length,
-    overdue: orders.filter(o => getDaysUntilDue(o.dueDate) < 0).length,
-    readyForInstall: orders.filter(o => o.stoneStatus === "In Stock" && o.permitStatus === "approved" && o.proofStatus === "Lettered").length
-  };
+  const stats = useMemo(() => {
+    if (!uiOrders) {
+      return { total: 0, pending: 0, overdue: 0, readyForInstall: 0 };
+    }
+    return {
+      total: uiOrders.length,
+      pending: uiOrders.filter(o => o.permitStatus === "pending" || o.permitStatus === "form_sent" || o.proofStatus === "Not_Received").length,
+      overdue: uiOrders.filter(o => o.dueDate && getDaysUntilDue(o.dueDate) < 0).length,
+      readyForInstall: uiOrders.filter(o => o.stoneStatus === "In Stock" && o.permitStatus === "approved" && o.proofStatus === "Lettered").length
+    };
+  }, [uiOrders]);
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <div className="text-red-600">
+          Error loading orders: {error instanceof Error ? error.message : 'Unknown error'}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -125,7 +115,7 @@ export const OrdersPage: React.FC = () => {
             <Settings className="h-4 w-4 mr-2" />
             {viewMode === "table" ? "Kanban View" : "Table View"}
           </Button>
-          <Button>
+          <Button onClick={() => setCreateDrawerOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />
             New Order
           </Button>
@@ -225,10 +215,19 @@ export const OrdersPage: React.FC = () => {
               </div>
             </CardHeader>
             <CardContent>
-              <SortableOrdersTable 
-                orders={filteredOrders} 
-                onViewOrder={(order) => setSelectedOrder(order)}
-              />
+              {isLoading ? (
+                <div className="text-center py-8 text-slate-600">Loading orders...</div>
+              ) : (
+                <SortableOrdersTable 
+                  orders={filteredOrders} 
+                  onViewOrder={(order) => {
+                    const dbOrder = ordersData?.find((o) => o.id === order.id);
+                    if (dbOrder) setSelectedOrder(dbOrder);
+                  }}
+                  onEditOrder={handleEditOrder}
+                  onDeleteOrder={handleDeleteOrder}
+                />
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -240,6 +239,36 @@ export const OrdersPage: React.FC = () => {
         onClose={() => setSelectedOrder(null)}
         onOrderUpdate={handleOrderUpdate}
       />
+
+      {/* Create Order Drawer */}
+      <CreateOrderDrawer
+        open={createDrawerOpen}
+        onOpenChange={setCreateDrawerOpen}
+      />
+
+      {/* Edit Order Drawer */}
+      {orderToEdit && (
+        <EditOrderDrawer
+          open={editDrawerOpen}
+          onOpenChange={(open) => {
+            setEditDrawerOpen(open);
+            if (!open) setOrderToEdit(null);
+          }}
+          order={orderToEdit}
+        />
+      )}
+
+      {/* Delete Order Dialog */}
+      {orderToDelete && (
+        <DeleteOrderDialog
+          open={deleteDialogOpen}
+          onOpenChange={(open) => {
+            setDeleteDialogOpen(open);
+            if (!open) setOrderToDelete(null);
+          }}
+          order={orderToDelete}
+        />
+      )}
     </div>
   );
 };

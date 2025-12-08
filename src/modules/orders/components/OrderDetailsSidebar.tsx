@@ -22,28 +22,10 @@ import {
   Save,
   XCircle
 } from 'lucide-react';
-
-interface Order {
-  id: string;
-  customer: string;
-  type: string;
-  stoneStatus: string;
-  permitStatus: string;
-  proofStatus: string;
-  dueDate: string;
-  depositDate: string;
-  secondPaymentDate: string | null;
-  installationDate: string | null;
-  value: string;
-  location: string;
-  progress: number;
-  assignedTo: string;
-  priority: string;
-  sku: string;
-  material: string;
-  color: string;
-  timelineWeeks: number;
-}
+import { useUpdateOrder } from '../hooks/useOrders';
+import { useToast } from '@/shared/hooks/use-toast';
+import { transformOrderForUI, type UIOrder } from '../utils/orderTransform';
+import type { Order } from '../types/orders.types';
 
 interface OrderDetailsSidebarProps {
   order: Order | null;
@@ -54,8 +36,13 @@ interface OrderDetailsSidebarProps {
 export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order, onClose, onOrderUpdate }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedOrder, setEditedOrder] = useState<Order | null>(null);
+  const { mutate: updateOrder, isPending } = useUpdateOrder();
+  const { toast } = useToast();
 
   if (!order) return null;
+
+  // Transform DB order to UI format for display
+  const uiOrder = transformOrderForUI(order);
 
   const handleEditStart = () => {
     setIsEditing(true);
@@ -68,11 +55,56 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
   };
 
   const handleEditSave = () => {
-    if (editedOrder && onOrderUpdate) {
-      onOrderUpdate(editedOrder.id, editedOrder);
-    }
-    setIsEditing(false);
-    setEditedOrder(null);
+    if (!editedOrder) return;
+
+    // Convert UI format back to DB format
+    const updates = {
+      customer_name: editedOrder.customer_name,
+      customer_email: editedOrder.customer_email || null,
+      customer_phone: editedOrder.customer_phone || null,
+      order_type: editedOrder.order_type,
+      sku: editedOrder.sku || null,
+      material: editedOrder.material || null,
+      color: editedOrder.color || null,
+      stone_status: editedOrder.stone_status,
+      permit_status: editedOrder.permit_status,
+      proof_status: editedOrder.proof_status,
+      deposit_date: editedOrder.deposit_date || null,
+      second_payment_date: editedOrder.second_payment_date || null,
+      due_date: editedOrder.due_date || null,
+      installation_date: editedOrder.installation_date || null,
+      location: editedOrder.location || null,
+      value: editedOrder.value,
+      progress: editedOrder.progress,
+      assigned_to: editedOrder.assigned_to || null,
+      priority: editedOrder.priority,
+      timeline_weeks: editedOrder.timeline_weeks,
+      notes: editedOrder.notes || null,
+    };
+
+    updateOrder(
+      { id: editedOrder.id, updates },
+      {
+        onSuccess: () => {
+          toast({
+            title: 'Order updated',
+            description: 'Order has been updated successfully.',
+          });
+          setIsEditing(false);
+          setEditedOrder(null);
+          if (onOrderUpdate) {
+            onOrderUpdate(editedOrder.id, updates);
+          }
+        },
+        onError: (error: any) => {
+          toast({
+            title: 'Error',
+            description: error.message || 'Failed to update order.',
+            variant: 'destructive',
+          });
+        },
+      }
+    );
   };
 
   const handleFieldChange = (field: keyof Order, value: any) => {
@@ -82,6 +114,7 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
   };
 
   const currentOrder = isEditing && editedOrder ? editedOrder : order;
+  const currentUIOrder = isEditing && editedOrder ? transformOrderForUI(editedOrder) : uiOrder;
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -112,7 +145,8 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
     }
   };
 
-  const getDaysUntilDue = (dueDate: string) => {
+  const getDaysUntilDue = (dueDate: string | null) => {
+    if (!dueDate) return Infinity;
     const today = new Date();
     const due = new Date(dueDate);
     const diffTime = due.getTime() - today.getTime();
@@ -121,8 +155,13 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
   };
 
   const getProgressData = (order: Order) => {
-    const orderStart = new Date(order.depositDate);
-    const installationDate = order.installationDate ? new Date(order.installationDate) : new Date(order.dueDate);
+    if (!order.deposit_date) {
+      return { daysPassed: 0, totalDays: 0, percentage: order.progress };
+    }
+    const orderStart = new Date(order.deposit_date);
+    const installationDate = order.installation_date 
+      ? new Date(order.installation_date) 
+      : (order.due_date ? new Date(order.due_date) : new Date());
     const today = new Date();
     
     const totalDays = Math.ceil((installationDate.getTime() - orderStart.getTime()) / (1000 * 60 * 60 * 24));
@@ -131,11 +170,11 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
     return {
       daysPassed: Math.min(daysPassed, totalDays),
       totalDays,
-      percentage: Math.min((daysPassed / totalDays) * 100, 100)
+      percentage: totalDays > 0 ? Math.min((daysPassed / totalDays) * 100, 100) : order.progress
     };
   };
 
-  const daysUntilDue = getDaysUntilDue(currentOrder.dueDate);
+  const daysUntilDue = getDaysUntilDue(currentOrder.due_date);
   const progressData = getProgressData(currentOrder);
 
   const stoneStatuses = ["NA", "Ordered", "In Stock"];
@@ -154,10 +193,10 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
           <div className="flex gap-2">
             {isEditing ? (
               <>
-                <Button variant="ghost" size="sm" onClick={handleEditSave}>
+                <Button variant="ghost" size="sm" onClick={handleEditSave} disabled={isPending}>
                   <Save className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="sm" onClick={handleEditCancel}>
+                <Button variant="ghost" size="sm" onClick={handleEditCancel} disabled={isPending}>
                   <XCircle className="h-4 w-4" />
                 </Button>
               </>
@@ -191,7 +230,7 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Stone Status</span>
                   {isEditing ? (
-                    <Select value={currentOrder.stoneStatus} onValueChange={(value) => handleFieldChange('stoneStatus', value)}>
+                    <Select value={currentOrder.stone_status} onValueChange={(value) => handleFieldChange('stone_status', value)}>
                       <SelectTrigger className="w-32">
                         <SelectValue />
                       </SelectTrigger>
@@ -202,15 +241,15 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
                       </SelectContent>
                     </Select>
                   ) : (
-                    <Badge className={getStatusColor(currentOrder.stoneStatus)}>
-                      {currentOrder.stoneStatus}
+                    <Badge className={getStatusColor(currentOrder.stone_status)}>
+                      {currentOrder.stone_status}
                     </Badge>
                   )}
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Permit Status</span>
                   {isEditing ? (
-                    <Select value={currentOrder.permitStatus} onValueChange={(value) => handleFieldChange('permitStatus', value)}>
+                    <Select value={currentOrder.permit_status} onValueChange={(value) => handleFieldChange('permit_status', value)}>
                       <SelectTrigger className="w-32">
                         <SelectValue />
                       </SelectTrigger>
@@ -221,15 +260,15 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
                       </SelectContent>
                     </Select>
                   ) : (
-                    <Badge className={getStatusColor(currentOrder.permitStatus)}>
-                      {currentOrder.permitStatus.replace('_', ' ')}
+                    <Badge className={getStatusColor(currentOrder.permit_status)}>
+                      {currentOrder.permit_status.replace('_', ' ')}
                     </Badge>
                   )}
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Proof Status</span>
                   {isEditing ? (
-                    <Select value={currentOrder.proofStatus} onValueChange={(value) => handleFieldChange('proofStatus', value)}>
+                    <Select value={currentOrder.proof_status} onValueChange={(value) => handleFieldChange('proof_status', value)}>
                       <SelectTrigger className="w-32">
                         <SelectValue />
                       </SelectTrigger>
@@ -240,8 +279,8 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
                       </SelectContent>
                     </Select>
                   ) : (
-                    <Badge className={getStatusColor(currentOrder.proofStatus)}>
-                      {currentOrder.proofStatus.replace('_', ' ')}
+                    <Badge className={getStatusColor(currentOrder.proof_status)}>
+                      {currentOrder.proof_status.replace('_', ' ')}
                     </Badge>
                   )}
                 </div>
@@ -273,12 +312,12 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
               <User className="h-4 w-4 text-muted-foreground" />
               {isEditing ? (
                 <Input 
-                  value={currentOrder.customer} 
-                  onChange={(e) => handleFieldChange('customer', e.target.value)}
+                  value={currentOrder.customer_name} 
+                  onChange={(e) => handleFieldChange('customer_name', e.target.value)}
                   className="h-6 text-sm"
                 />
               ) : (
-                <span className="font-medium">{currentOrder.customer}</span>
+                <span className="font-medium">{currentUIOrder.customer}</span>
               )}
             </div>
             <div className="flex gap-2">
@@ -304,60 +343,62 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
               <Package className="h-4 w-4 text-muted-foreground" />
               {isEditing ? (
                 <Input 
-                  value={currentOrder.type} 
-                  onChange={(e) => handleFieldChange('type', e.target.value)}
+                  value={currentOrder.order_type} 
+                  onChange={(e) => handleFieldChange('order_type', e.target.value)}
                   className="h-6 text-sm"
                 />
               ) : (
-                <span>{currentOrder.type}</span>
+                <span>{currentUIOrder.type}</span>
               )}
             </div>
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground w-16">SKU:</span>
               {isEditing ? (
                 <Input 
-                  value={currentOrder.sku} 
+                  value={currentOrder.sku || ''} 
                   onChange={(e) => handleFieldChange('sku', e.target.value)}
                   className="h-6 text-sm flex-1"
                 />
               ) : (
-                <span className="font-medium">{currentOrder.sku}</span>
+                <span className="font-medium">{currentUIOrder.sku || 'N/A'}</span>
               )}
             </div>
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground w-16">Material:</span>
               {isEditing ? (
                 <Input 
-                  value={currentOrder.material} 
+                  value={currentOrder.material || ''} 
                   onChange={(e) => handleFieldChange('material', e.target.value)}
                   className="h-6 text-sm flex-1"
                 />
               ) : (
-                <span>{currentOrder.material}</span>
+                <span>{currentUIOrder.material || 'N/A'}</span>
               )}
             </div>
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground w-16">Color:</span>
               {isEditing ? (
                 <Input 
-                  value={currentOrder.color} 
+                  value={currentOrder.color || ''} 
                   onChange={(e) => handleFieldChange('color', e.target.value)}
                   className="h-6 text-sm flex-1"
                 />
               ) : (
-                <span>{currentOrder.color}</span>
+                <span>{currentUIOrder.color || 'N/A'}</span>
               )}
             </div>
             <div className="flex items-center gap-2">
               <DollarSign className="h-4 w-4 text-muted-foreground" />
               {isEditing ? (
                 <Input 
-                  value={currentOrder.value} 
-                  onChange={(e) => handleFieldChange('value', e.target.value)}
+                  type="number"
+                  step="0.01"
+                  value={currentOrder.value ?? ''} 
+                  onChange={(e) => handleFieldChange('value', e.target.value ? parseFloat(e.target.value) : null)}
                   className="h-6 text-sm"
                 />
               ) : (
-                <span className="font-medium">{currentOrder.value}</span>
+                <span className="font-medium">{currentUIOrder.value}</span>
               )}
             </div>
             <div className="flex items-center gap-2">
@@ -365,37 +406,37 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
               {isEditing ? (
                 <Input 
                   type="number"
-                  value={currentOrder.timelineWeeks} 
-                  onChange={(e) => handleFieldChange('timelineWeeks', parseInt(e.target.value))}
+                  value={currentOrder.timeline_weeks} 
+                  onChange={(e) => handleFieldChange('timeline_weeks', parseInt(e.target.value) || 12)}
                   className="h-6 text-sm w-20"
                 />
               ) : (
-                <span>{currentOrder.timelineWeeks} weeks</span>
+                <span>{currentUIOrder.timelineWeeks} weeks</span>
               )}
             </div>
             <div className="flex items-center gap-2">
               <MapPin className="h-4 w-4 text-muted-foreground" />
               {isEditing ? (
                 <Input 
-                  value={currentOrder.location} 
+                  value={currentOrder.location || ''} 
                   onChange={(e) => handleFieldChange('location', e.target.value)}
                   className="h-6 text-sm"
                 />
               ) : (
-                <span>{currentOrder.location}</span>
+                <span>{currentUIOrder.location || 'N/A'}</span>
               )}
             </div>
             <div className="flex items-center gap-2">
               <User className="h-4 w-4 text-muted-foreground" />
               {isEditing ? (
                 <Input 
-                  value={currentOrder.assignedTo} 
-                  onChange={(e) => handleFieldChange('assignedTo', e.target.value)}
+                  value={currentOrder.assigned_to || ''} 
+                  onChange={(e) => handleFieldChange('assigned_to', e.target.value)}
                   className="h-6 text-sm"
                   placeholder="Assigned to:"
                 />
               ) : (
-                <span>Assigned to: {currentOrder.assignedTo}</span>
+                <span>Assigned to: {currentUIOrder.assignedTo || 'Unassigned'}</span>
               )}
             </div>
             <div className="flex items-center gap-2">
@@ -418,12 +459,12 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
               {isEditing ? (
                 <Input 
                   type="date"
-                  value={currentOrder.depositDate} 
-                  onChange={(e) => handleFieldChange('depositDate', e.target.value)}
+                  value={currentOrder.deposit_date || ''} 
+                  onChange={(e) => handleFieldChange('deposit_date', e.target.value || null)}
                   className="h-6 text-sm w-32"
                 />
               ) : (
-                <span className="text-sm font-medium">{currentOrder.depositDate}</span>
+                <span className="text-sm font-medium">{currentUIOrder.depositDate || 'N/A'}</span>
               )}
             </div>
             <Separator />
@@ -432,13 +473,13 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
               {isEditing ? (
                 <Input 
                   type="date"
-                  value={currentOrder.secondPaymentDate || ''} 
-                  onChange={(e) => handleFieldChange('secondPaymentDate', e.target.value || null)}
+                  value={currentOrder.second_payment_date || ''} 
+                  onChange={(e) => handleFieldChange('second_payment_date', e.target.value || null)}
                   className="h-6 text-sm w-32"
                 />
               ) : (
                 <span className="text-sm font-medium">
-                  {currentOrder.secondPaymentDate || (
+                  {currentUIOrder.secondPaymentDate || (
                     <span className="text-muted-foreground italic">Not scheduled</span>
                   )}
                 </span>
@@ -450,12 +491,12 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
               {isEditing ? (
                 <Input 
                   type="date"
-                  value={currentOrder.dueDate} 
-                  onChange={(e) => handleFieldChange('dueDate', e.target.value)}
+                  value={currentOrder.due_date || ''} 
+                  onChange={(e) => handleFieldChange('due_date', e.target.value || null)}
                   className="h-6 text-sm w-32"
                 />
               ) : (
-                <span className="text-sm font-medium">{currentOrder.dueDate}</span>
+                <span className="text-sm font-medium">{currentUIOrder.dueDate || 'N/A'}</span>
               )}
             </div>
             <Separator />
@@ -464,13 +505,13 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
               {isEditing ? (
                 <Input 
                   type="date"
-                  value={currentOrder.installationDate || ''} 
-                  onChange={(e) => handleFieldChange('installationDate', e.target.value || null)}
+                  value={currentOrder.installation_date || ''} 
+                  onChange={(e) => handleFieldChange('installation_date', e.target.value || null)}
                   className="h-6 text-sm w-32"
                 />
               ) : (
                 <span className="text-sm font-medium">
-                  {currentOrder.installationDate || (
+                  {currentUIOrder.installationDate || (
                     <span className="text-muted-foreground italic">Not scheduled</span>
                   )}
                 </span>
