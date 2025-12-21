@@ -11,6 +11,7 @@ import { transformInvoicesForUI, type UIInvoice } from '../utils/invoiceTransfor
 import { CreateInvoiceDrawer } from '../components/CreateInvoiceDrawer';
 import { EditInvoiceDrawer } from '../components/EditInvoiceDrawer';
 import { DeleteInvoiceDialog } from '../components/DeleteInvoiceDialog';
+import { InvoiceDetailSidebar } from '../components/InvoiceDetailSidebar';
 import type { Invoice } from '../types/invoicing.types';
 
 export const InvoicingPage: React.FC = () => {
@@ -21,6 +22,7 @@ export const InvoicingPage: React.FC = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [invoiceToEdit, setInvoiceToEdit] = useState<Invoice | null>(null);
   const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
 
   const { data: invoicesData, isLoading, error } = useInvoicesList();
 
@@ -276,7 +278,14 @@ export const InvoicingPage: React.FC = () => {
                             >
                               <Trash2 className="h-3 w-3" />
                             </Button>
-                            <Button variant="outline" size="sm">
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => {
+                                const dbInvoice = invoicesData?.find((inv) => inv.id === invoice.id);
+                                if (dbInvoice) setSelectedInvoice(dbInvoice);
+                              }}
+                            >
                               <Eye className="h-3 w-3" />
                             </Button>
                             <Button variant="outline" size="sm">
@@ -326,6 +335,12 @@ export const InvoicingPage: React.FC = () => {
           invoice={invoiceToDelete}
         />
       )}
+
+      {/* Invoice Detail Sidebar */}
+      <InvoiceDetailSidebar
+        invoice={selectedInvoice}
+        onClose={() => setSelectedInvoice(null)}
+      />
     </div>
   );
 };

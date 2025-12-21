@@ -22,6 +22,22 @@ export async function fetchOrder(id: string) {
   return data as Order;
 }
 
+/**
+ * Fetch all orders associated with a specific invoice
+ * @param invoiceId - UUID of the invoice
+ * @returns Array of Order objects ordered by creation date (newest first)
+ */
+export async function fetchOrdersByInvoice(invoiceId: string) {
+  const { data, error } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('invoice_id', invoiceId)
+    .order('created_at', { ascending: false });
+  
+  if (error) throw error;
+  return data as Order[];
+}
+
 export async function createOrder(order: OrderInsert) {
   const { data, error } = await supabase
     .from('orders')

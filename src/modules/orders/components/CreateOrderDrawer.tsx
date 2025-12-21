@@ -34,11 +34,13 @@ import { useToast } from '@/shared/hooks/use-toast';
 interface CreateOrderDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  invoiceId?: string | null; // Optional invoice ID for pre-filling invoice_id
 }
 
 export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
   open,
   onOpenChange,
+  invoiceId,
 }) => {
   const { mutate: createOrder, isPending } = useCreateOrder();
   const { toast } = useToast();
@@ -86,6 +88,7 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
       second_payment_date: data.second_payment_date || null,
       due_date: data.due_date || null,
       installation_date: data.installation_date || null,
+      invoice_id: invoiceId || null, // Pre-fill from prop if provided
     };
 
     createOrder(orderData, {
