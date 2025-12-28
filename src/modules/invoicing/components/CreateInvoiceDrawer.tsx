@@ -55,6 +55,9 @@ const buildNotes = (dimensions: string, notes: string): string | null => {
   return parts.length > 0 ? parts.join('\n\n') : null;
 };
 
+// Sentinel value for "no person selected" in Radix Select (cannot use empty string)
+const NO_PERSON_SENTINEL = '__none__';
+
 export const CreateInvoiceDrawer: React.FC<CreateInvoiceDrawerProps> = ({
   open,
   onOpenChange,
@@ -227,22 +230,31 @@ export const CreateInvoiceDrawer: React.FC<CreateInvoiceDrawerProps> = ({
                   name="customer_name"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Person *</FormLabel>
+                      <FormLabel>Person</FormLabel>
                       <Select
                         onValueChange={(value) => {
-                          const customer = customers?.find(c => c.id === value);
-                          if (customer) {
-                            field.onChange(`${customer.first_name} ${customer.last_name}`);
+                          if (value === NO_PERSON_SENTINEL) {
+                            field.onChange(''); // Map sentinel to empty string for form state
+                          } else if (value) {
+                            const customer = customers?.find(c => c.id === value);
+                            if (customer) {
+                              field.onChange(`${customer.first_name} ${customer.last_name}`);
+                            }
                           }
                         }}
-                        value={customers?.find(c => `${c.first_name} ${c.last_name}` === field.value)?.id ?? undefined}
+                        value={
+                          field.value && field.value !== ''
+                            ? customers?.find(c => `${c.first_name} ${c.last_name}` === field.value)?.id ?? NO_PERSON_SENTINEL
+                            : NO_PERSON_SENTINEL
+                        }
                       >
                         <FormControl>
                           <SelectTrigger>
-                            <SelectValue placeholder="Select person" />
+                            <SelectValue placeholder="Select person (optional)" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
+                          <SelectItem value={NO_PERSON_SENTINEL}>None</SelectItem>
                           {!customers || customers.length === 0 ? (
                             <div className="p-2 text-sm text-muted-foreground">No people available</div>
                           ) : (

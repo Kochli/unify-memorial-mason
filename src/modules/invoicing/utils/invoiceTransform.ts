@@ -35,7 +35,7 @@ export function transformInvoiceForUI(invoice: Invoice): UIInvoice {
     id: invoice.id,
     invoiceNumber: invoice.invoice_number,
     orderId: invoice.order_id,
-    customer: invoice.customer_name,
+    customer: invoice.customer_name || 'No person assigned',
     amount: `$${invoice.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     status: displayStatus,
     dueDate: invoice.due_date,

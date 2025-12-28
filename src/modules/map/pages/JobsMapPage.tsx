@@ -14,33 +14,58 @@ import {
   SelectValue,
 } from '@/shared/components/ui/select';
 import { GoogleMap } from "../components/GoogleMap";
-import { useJobsList } from '../hooks/useJobs';
-import { transformJobsToMarkers, type MapMarker } from '../utils/mapTransform';
+import { OrderInfoPanel } from "../components/OrderInfoPanel";
+import { StatusFilterControl } from "../components/StatusFilterControl";
+import { CreateJobDrawer } from '@/modules/jobs/components/CreateJobDrawer';
+import { useOrdersForMap } from '../hooks/useOrders';
+import { transformOrdersToMarkers, type OrderMapMarker } from '../utils/orderMapTransform';
 import { useToast } from '@/shared/hooks/use-toast';
 import { format } from 'date-fns';
+import type { Order } from '@/modules/orders/types/orders.types';
+import { OPERATIONAL_STATUSES, type OperationalStatus } from '../utils/orderStatusMap';
 
 export const JobsMapPage: React.FC = () => {
-  const { data: jobsData, isLoading, error, refetch } = useJobsList();
+  const { data: ordersData, isLoading, error, refetch } = useOrdersForMap();
   const { toast } = useToast();
   const [activeFilter, setActiveFilter] = useState("all");
-  const [selectedJob, setSelectedJob] = useState<string | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<string | null>(null);
+  const [selectedOrderForInfo, setSelectedOrderForInfo] = useState<Order | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
+  const [isCreateJobDrawerOpen, setIsCreateJobDrawerOpen] = useState(false);
+  const [enabledStatuses, setEnabledStatuses] = useState<Set<OperationalStatus>>(
+    new Set(OPERATIONAL_STATUSES) // Default: all enabled
+  );
 
-  // Transform jobs to markers
+  // Toggle selection function
+  const toggleOrderSelection = (orderId: string, isAssigned: boolean) => {
+    if (isAssigned) return; // Cannot select assigned Orders
+    
+    setSelectedOrderIds(prev => {
+      const next = new Set(prev);
+      if (next.has(orderId)) {
+        next.delete(orderId);
+      } else {
+        next.add(orderId);
+      }
+      return next;
+    });
+  };
+
+  // Clear selection function
+  const clearSelection = () => {
+    setSelectedOrderIds(new Set());
+  };
+
+  // Transform orders to markers
   const markers = useMemo(() => {
-    if (!jobsData) return [];
-    return transformJobsToMarkers(jobsData);
-  }, [jobsData]);
+    if (!ordersData) return [];
+    return transformOrdersToMarkers(ordersData);
+  }, [ordersData]);
 
-  // Filter markers based on status and search
+  // Filter markers based on search and status
   const filteredMarkers = useMemo(() => {
     let filtered = markers;
-    
-    // Status filter
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(marker => marker.status === statusFilter);
-    }
     
     // Search filter
     if (searchQuery) {
@@ -48,40 +73,151 @@ export const JobsMapPage: React.FC = () => {
       filtered = filtered.filter(marker =>
         marker.customer.toLowerCase().includes(query) ||
         marker.location.toLowerCase().includes(query) ||
-        marker.address.toLowerCase().includes(query)
+        (marker.sku && marker.sku.toLowerCase().includes(query))
+      );
+    }
+    
+    // Status filter
+    if (enabledStatuses.size > 0 && enabledStatuses.size < OPERATIONAL_STATUSES.length) {
+      filtered = filtered.filter(marker => 
+        enabledStatuses.has(marker.operationalStatus)
       );
     }
     
     return filtered;
-  }, [markers, statusFilter, searchQuery]);
+  }, [markers, searchQuery, enabledStatuses]);
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "scheduled": return "bg-blue-100 text-blue-700";
-      case "in_progress": return "bg-orange-100 text-orange-700";
-      case "ready_for_installation": return "bg-green-100 text-green-700";
-      case "completed": return "bg-green-100 text-green-700";
-      case "cancelled": return "bg-red-100 text-red-700";
-      default: return "bg-gray-100 text-gray-700";
+  const getAssignmentBadge = (isAssigned: boolean) => {
+    if (isAssigned) {
+      return "bg-gray-100 text-gray-700";
+    }
+    return "bg-blue-100 text-blue-700";
+  };
+
+  // Calculate total price of selected Orders
+  const selectedOrdersTotal = useMemo(() => {
+    if (!ordersData || selectedOrderIds.size === 0) return 0;
+    
+    return Array.from(selectedOrderIds)
+      .reduce((sum, orderId) => {
+        const order = ordersData.find(o => o.id === orderId);
+        return sum + (order?.value || 0);
+      }, 0);
+  }, [ordersData, selectedOrderIds]);
+
+  // Handle marker click to show info panel
+  const handleMarkerClick = (orderId: string) => {
+    const order = ordersData?.find(o => o.id === orderId);
+    if (order) {
+      setSelectedOrderForInfo(order);
     }
   };
 
-  const getRouteOptimization = () => {
-    const readyMarkers = filteredMarkers.filter(marker => marker.status === "ready_for_installation");
-    return readyMarkers.sort((a, b) => {
-      if (!a.scheduledDate && !b.scheduledDate) return 0;
-      if (!a.scheduledDate) return 1;
-      if (!b.scheduledDate) return -1;
-      return new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime();
+  // Handle toggle selection from info panel
+  const handleToggleSelectionFromPanel = (orderId: string) => {
+    const order = ordersData?.find(o => o.id === orderId);
+    if (order && !order.job_id) {
+      toggleOrderSelection(orderId, false);
+    }
+  };
+
+  // Handle view order navigation
+  const handleViewOrder = (orderId: string) => {
+    // Navigate to Orders module (or open Order detail drawer)
+    window.location.href = `/dashboard/orders?order=${orderId}`;
+  };
+
+  // Get first selected Order for auto-filling location
+  const firstSelectedOrder = useMemo(() => {
+    if (!ordersData || selectedOrderIds.size === 0) return null;
+    const firstId = Array.from(selectedOrderIds)[0];
+    return ordersData.find(o => o.id === firstId) || null;
+  }, [ordersData, selectedOrderIds]);
+
+  // Handle Create Job button click
+  const handleCreateJob = () => {
+    if (selectedOrderIds.size === 0) return;
+    
+    // Filter to only visible and unassigned Orders
+    const visibleOrderIds = new Set(filteredMarkers.map(m => m.id));
+    const validSelectedIds = Array.from(selectedOrderIds).filter(id => {
+      const marker = filteredMarkers.find(m => m.id === id);
+      return marker && !marker.isAssigned && visibleOrderIds.has(id);
+    });
+    
+    if (validSelectedIds.length === 0) {
+      toast({
+        title: 'No valid orders selected',
+        description: 'Selected orders must be visible and unassigned.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
+    // Update selectedOrderIds to only valid ones
+    setSelectedOrderIds(new Set(validSelectedIds));
+    setIsCreateJobDrawerOpen(true);
+  };
+
+  // Handle drawer close
+  const handleDrawerClose = (open: boolean) => {
+    setIsCreateJobDrawerOpen(open);
+  };
+
+  // Handle Job creation success
+  const handleJobCreated = () => {
+    // Refresh Orders data
+    refetch();
+    
+    // Clear selection
+    clearSelection();
+    
+    // Close drawer
+    setIsCreateJobDrawerOpen(false);
+    
+    // Close info panel if open
+    setSelectedOrderForInfo(null);
+    
+    // Show success message
+    toast({
+      title: 'Job created',
+      description: `Job created with ${selectedOrderIds.size} order(s).`,
     });
   };
+
+  // Handle Job creation error
+  const handleJobCreationError = (error: Error) => {
+    toast({
+      title: 'Failed to create job',
+      description: error.message || 'An error occurred while creating the job.',
+      variant: 'destructive',
+    });
+    // Selection state is maintained (not cleared) to allow retry
+  };
+
+  // Auto-deselect hidden Orders when filters change
+  useEffect(() => {
+    const visibleOrderIds = new Set(filteredMarkers.map(m => m.id));
+    setSelectedOrderIds(prev => {
+      const next = new Set(prev);
+      let changed = false;
+      // Remove any selected IDs that are not visible
+      prev.forEach(id => {
+        if (!visibleOrderIds.has(id)) {
+          next.delete(id);
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [filteredMarkers]);
 
   // Error handling
   useEffect(() => {
     if (error) {
       toast({
-        title: 'Error loading jobs',
-        description: error.message || 'Failed to load job locations',
+        title: 'Error loading orders',
+        description: error.message || 'Failed to load order locations',
         variant: 'destructive',
       });
     }
@@ -91,9 +227,9 @@ export const JobsMapPage: React.FC = () => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold">Map of Jobs</h1>
+          <h1 className="text-2xl font-bold">Map of Orders</h1>
           <p className="text-sm text-slate-600 mt-1">
-            Track job locations and optimize routes
+            View order locations and create jobs
           </p>
         </div>
         <div className="flex gap-2">
@@ -114,26 +250,23 @@ export const JobsMapPage: React.FC = () => {
             <CardHeader>
               <div className="flex justify-between items-center mb-4">
                 <CardTitle>Interactive Map</CardTitle>
-                <div className="flex gap-2 items-center">
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="Filter by status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Statuses</SelectItem>
-                      <SelectItem value="scheduled">Scheduled</SelectItem>
-                      <SelectItem value="in_progress">In Progress</SelectItem>
-                      <SelectItem value="ready_for_installation">Ready for Installation</SelectItem>
-                      <SelectItem value="completed">Completed</SelectItem>
-                      <SelectItem value="cancelled">Cancelled</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button variant="outline" size="sm">
-                    <Filter className="h-4 w-4 mr-2" />
-                    Filter
-                  </Button>
-                </div>
               </div>
+              <StatusFilterControl
+                enabledStatuses={enabledStatuses}
+                onStatusToggle={(status) => {
+                  setEnabledStatuses(prev => {
+                    const next = new Set(prev);
+                    if (next.has(status)) {
+                      next.delete(status);
+                    } else {
+                      next.add(status);
+                    }
+                    return next;
+                  });
+                }}
+                onSelectAll={() => setEnabledStatuses(new Set(OPERATIONAL_STATUSES))}
+                onClearAll={() => setEnabledStatuses(new Set())}
+              />
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -147,8 +280,13 @@ export const JobsMapPage: React.FC = () => {
             <CardContent className="h-full">
               <GoogleMap 
                 markers={filteredMarkers}
-                selectedMarker={selectedJob}
-                onMarkerSelect={setSelectedJob}
+                selectedMarker={selectedOrder}
+                selectedMarkerIds={selectedOrderIds}
+                onMarkerSelect={(id) => {
+                  setSelectedOrder(id);
+                  if (id) handleMarkerClick(id);
+                }}
+                onMarkerToggle={toggleOrderSelection}
                 isLoading={isLoading}
                 error={error}
               />
@@ -159,13 +297,13 @@ export const JobsMapPage: React.FC = () => {
         <div className="space-y-4">
           <Tabs value={activeFilter} onValueChange={setActiveFilter}>
             <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="all">All Jobs</TabsTrigger>
-              <TabsTrigger value="ready">Ready</TabsTrigger>
+              <TabsTrigger value="all">All Orders</TabsTrigger>
+              <TabsTrigger value="unassigned">Unassigned</TabsTrigger>
             </TabsList>
             
             <TabsContent value={activeFilter} className="space-y-4">
               <h3 className="text-lg font-semibold">
-                {activeFilter === "ready" ? "Ready for Installation" : "All Jobs"}
+                {activeFilter === "unassigned" ? "Unassigned Orders" : "All Orders"}
               </h3>
               
               {isLoading ? (
@@ -176,18 +314,26 @@ export const JobsMapPage: React.FC = () => {
                 </div>
               ) : filteredMarkers.length === 0 ? (
                 <div className="text-center py-8 text-slate-600">
-                  {searchQuery || statusFilter !== 'all'
-                    ? 'No jobs match your filters'
-                    : 'No jobs with coordinates found'}
+                  {searchQuery
+                    ? 'No orders match your search'
+                    : enabledStatuses.size === 0
+                    ? 'No status filters selected. Enable at least one status to view orders.'
+                    : 'No orders match the selected status filters'}
                 </div>
               ) : (
-                filteredMarkers.map((marker) => (
+                filteredMarkers
+                  .filter(marker => activeFilter === 'unassigned' ? !marker.isAssigned : true)
+                  .map((marker) => (
                   <Card 
                     key={marker.id} 
                     className={`cursor-pointer transition-all hover:shadow-md ${
-                      selectedJob === marker.id ? "ring-2 ring-blue-500" : ""
+                      selectedOrder === marker.id ? "ring-2 ring-blue-500" : ""
                     }`}
-                    onClick={() => setSelectedJob(selectedJob === marker.id ? null : marker.id)}
+                    onClick={() => {
+                      const newSelected = selectedOrder === marker.id ? null : marker.id;
+                      setSelectedOrder(newSelected);
+                      if (newSelected) handleMarkerClick(newSelected);
+                    }}
                   >
                     <CardContent className="pt-4">
                       <div className="flex justify-between items-start mb-2">
@@ -196,8 +342,8 @@ export const JobsMapPage: React.FC = () => {
                           <p className="text-sm text-slate-600">{marker.location}</p>
                         </div>
                         <div className="flex gap-2">
-                          <Badge className={getStatusColor(marker.status)}>
-                            {marker.status.replace('_', ' ')}
+                          <Badge className={getAssignmentBadge(marker.isAssigned)}>
+                            {marker.isAssigned ? 'Assigned' : 'Available'}
                           </Badge>
                           {marker.priority === "high" && (
                             <Badge variant="destructive">Urgent</Badge>
@@ -210,25 +356,25 @@ export const JobsMapPage: React.FC = () => {
                           <MapPin className="h-3 w-3 mr-1" />
                           <span>{marker.location}</span>
                         </div>
-                        <div className="flex items-center">
-                          <Calendar className="h-3 w-3 mr-1" />
-                          <span>Scheduled: {marker.scheduledDate ? format(new Date(marker.scheduledDate), 'MMM dd, yyyy') : 'Not scheduled'}</span>
-                        </div>
-                        {marker.estimatedDuration && (
+                        {marker.sku && (
                           <div className="flex items-center">
-                            <Clock className="h-3 w-3 mr-1" />
-                            <span>Est. {marker.estimatedDuration}</span>
+                            <span>Grave Number: {marker.sku}</span>
+                          </div>
+                        )}
+                        {marker.value && (
+                          <div className="flex items-center">
+                            <span>Price: £{marker.value.toFixed(2)}</span>
                           </div>
                         )}
                       </div>
 
-                      {selectedJob === marker.id && (
+                      {selectedOrder === marker.id && (
                         <div className="mt-4 pt-4 border-t space-y-2">
                           <p className="text-sm text-slate-600">{marker.address}</p>
                           <div className="flex gap-2">
                             <Button size="sm" variant="outline" asChild>
-                              <a href={`/dashboard/jobs/${marker.id}`}>
-                                View Job
+                              <a href={`/dashboard/orders?order=${marker.id}`}>
+                                View Order
                               </a>
                             </Button>
                           </div>
@@ -241,39 +387,60 @@ export const JobsMapPage: React.FC = () => {
             </TabsContent>
           </Tabs>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Route Optimization</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-slate-600 mb-3">
-                Suggested route for today's installations:
-              </p>
-              {getRouteOptimization().length > 0 ? (
-                <>
-                  <div className="space-y-2">
-                    {getRouteOptimization().map((marker, index) => (
-                      <div key={marker.id} className="flex items-center text-sm">
-                        <div className="w-6 h-6 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center mr-2 text-xs">
-                          {index + 1}
-                        </div>
-                        <span>{marker.location}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <Button size="sm" className="w-full mt-3">
-                    Start Navigation
-                  </Button>
-                </>
-              ) : (
-                <p className="text-sm text-slate-500 text-center py-4">
-                  No ready jobs for route optimization
-                </p>
-              )}
-            </CardContent>
-          </Card>
         </div>
       </div>
+
+      {/* Selection Action Bar */}
+      {selectedOrderIds.size > 0 && (
+        <Card className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-50 shadow-lg max-w-md">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium">
+                  {selectedOrderIds.size} Order{selectedOrderIds.size !== 1 ? 's' : ''} selected
+                </p>
+                <p className="text-xs text-slate-600">
+                  Total: £{selectedOrdersTotal.toFixed(2)}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={clearSelection} size="sm">
+                  Clear
+                </Button>
+                <Button onClick={handleCreateJob} size="sm">
+                  Create Job
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Order Info Panel */}
+      {selectedOrderForInfo && (
+        <div className="fixed top-4 right-4 z-50">
+          <OrderInfoPanel
+            order={selectedOrderForInfo}
+            isSelected={selectedOrderIds.has(selectedOrderForInfo.id)}
+            onToggleSelection={() => handleToggleSelectionFromPanel(selectedOrderForInfo.id)}
+            onViewOrder={() => handleViewOrder(selectedOrderForInfo.id)}
+            onClose={() => setSelectedOrderForInfo(null)}
+          />
+        </div>
+      )}
+
+      {/* Create Job Drawer */}
+      <CreateJobDrawer
+        open={isCreateJobDrawerOpen}
+        onOpenChange={handleDrawerClose}
+        initialOrderIds={Array.from(selectedOrderIds).filter(id => {
+          const marker = filteredMarkers.find(m => m.id === id);
+          return marker && !marker.isAssigned;
+        })}
+        initialLocation={firstSelectedOrder?.location || ''}
+        onJobCreated={handleJobCreated}
+        onError={handleJobCreationError}
+      />
     </div>
   );
 };

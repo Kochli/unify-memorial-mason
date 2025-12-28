@@ -43,11 +43,19 @@ import { useCustomersList } from '@/modules/customers/hooks/useCustomers';
 interface CreateJobDrawerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  initialOrderIds?: string[]; // NEW - pre-fill order_ids
+  initialLocation?: string; // NEW - pre-fill location
+  onJobCreated?: () => void; // NEW - callback after successful creation
+  onError?: (error: Error) => void; // NEW - error callback
 }
 
 export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
   open,
   onOpenChange,
+  initialOrderIds = [],
+  initialLocation = '',
+  onJobCreated,
+  onError,
 }) => {
   const { mutateAsync: createJobAsync, isPending } = useCreateJob();
   const { mutateAsync: updateOrderAsync } = useUpdateOrder();
@@ -63,9 +71,9 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
   const form = useForm<JobFormData>({
     resolver: zodResolver(jobFormSchema),
     defaultValues: {
-      order_ids: [],
+      order_ids: initialOrderIds,
       assigned_people_ids: [],
-      location_name: '',
+      location_name: initialLocation,
       address: '',
       latitude: null,
       longitude: null,
@@ -81,9 +89,9 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
   useEffect(() => {
     if (open) {
       form.reset({
-        order_ids: [],
+        order_ids: initialOrderIds,
         assigned_people_ids: [],
-        location_name: '',
+        location_name: initialLocation,
         address: '',
         latitude: null,
         longitude: null,
@@ -94,9 +102,9 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
         notes: '',
       });
     }
-  }, [open, form]);
+  }, [open, form, initialOrderIds, initialLocation]);
 
-  // Auto-fill location from first selected Order
+  // Auto-fill location from first selected Order (only if not provided via initialLocation)
   const selectedOrderIds = form.watch('order_ids');
   const firstSelectedOrder = useMemo(() => {
     if (!selectedOrderIds || selectedOrderIds.length === 0) return null;
@@ -104,8 +112,8 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
   }, [selectedOrderIds, ordersData]);
 
   useEffect(() => {
-    if (firstSelectedOrder && open) {
-      // Only auto-fill if fields are empty (don't override user edits)
+    if (firstSelectedOrder && open && !initialLocation) {
+      // Only auto-fill if initialLocation was not provided and fields are empty
       if (!form.getValues('location_name') && firstSelectedOrder.location) {
         form.setValue('location_name', firstSelectedOrder.location);
       }
@@ -116,7 +124,7 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
         form.setValue('longitude', firstSelectedOrder.longitude);
       }
     }
-  }, [firstSelectedOrder, open, form]);
+  }, [firstSelectedOrder, open, form, initialLocation]);
 
   const onSubmit = async (values: JobFormData) => {
     // Extract UI-only fields
@@ -155,6 +163,10 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
         title: 'Job created',
         description: `Job and ${order_ids.length} order(s) updated successfully.`,
       });
+      
+      // Call success callback if provided
+      onJobCreated?.();
+      
       form.reset();
       onOpenChange(false);
     } catch (error) {
@@ -171,6 +183,9 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
         description: errorMessage,
         variant: 'destructive',
       });
+      
+      // Call error callback if provided
+      onError?.(error instanceof Error ? error : new Error(errorMessage));
     }
   };
 

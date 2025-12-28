@@ -4,11 +4,15 @@ import { MapPin } from 'lucide-react';
 import { format } from 'date-fns';
 import type { MapMarker } from '../utils/mapTransform';
 import { getMarkerColor } from '../utils/mapTransform';
+import type { OrderMapMarker } from '../utils/orderMapTransform';
+import { getOrderMarkerColor } from '../utils/orderMapTransform';
 
 interface MapProps {
   markers: MapMarker[];
-  selectedMarker: string | null;
-  onMarkerSelect: (markerId: string | null) => void;
+  selectedMarker: string | null; // DEPRECATED - keep for backward compatibility
+  selectedMarkerIds?: Set<string>; // NEW - multi-select support
+  onMarkerSelect: (markerId: string | null) => void; // DEPRECATED
+  onMarkerToggle?: (markerId: string, isAssigned: boolean) => void; // NEW
   isLoading?: boolean;
   error?: Error | null;
 }
@@ -16,7 +20,9 @@ interface MapProps {
 export const GoogleMap: React.FC<MapProps> = ({ 
   markers, 
   selectedMarker, 
+  selectedMarkerIds = new Set(),
   onMarkerSelect, 
+  onMarkerToggle,
   isLoading = false,
   error = null 
 }) => {
@@ -104,7 +110,18 @@ export const GoogleMap: React.FC<MapProps> = ({
 
     // Add new markers
     const newMarkers = markers.map(marker => {
-      const markerColor = getMarkerColor(marker.status);
+      // Check if this is an OrderMapMarker
+      const orderMarker = marker as OrderMapMarker;
+      const isOrderMarker = 'isAssigned' in marker;
+      
+      // Determine marker color based on type
+      let markerColor: string;
+      if (isOrderMarker && onMarkerToggle) {
+        const isSelected = selectedMarkerIds.has(marker.id);
+        markerColor = getOrderMarkerColor(orderMarker.isAssigned, isSelected);
+      } else {
+        markerColor = getMarkerColor(marker.status);
+      }
       
       const googleMarker = new google.maps.Marker({
         position: marker.coordinates,
@@ -131,9 +148,27 @@ export const GoogleMap: React.FC<MapProps> = ({
         // Close other info windows
         infoWindowsRef.current.forEach(window => window.close());
         
-        // Open this info window
-        infoWindow.open(map, googleMarker);
-        onMarkerSelect(selectedMarker === marker.id ? null : marker.id);
+        // Handle Order marker selection
+        if (isOrderMarker && onMarkerToggle) {
+          // Always call onMarkerSelect to trigger info panel
+          onMarkerSelect(marker.id);
+          
+          if (orderMarker.isAssigned) {
+            // Show info but don't allow selection
+            infoWindow.open(map, googleMarker);
+            return;
+          }
+          
+          // Toggle selection
+          onMarkerToggle(marker.id, orderMarker.isAssigned);
+          
+          // Show info window
+          infoWindow.open(map, googleMarker);
+        } else {
+          // Legacy behavior for Job markers
+          infoWindow.open(map, googleMarker);
+          onMarkerSelect(selectedMarker === marker.id ? null : marker.id);
+        }
       });
 
       markersRef.current.push(googleMarker);
@@ -151,7 +186,7 @@ export const GoogleMap: React.FC<MapProps> = ({
       });
       map.fitBounds(bounds);
     }
-  }, [map, markers, selectedMarker, onMarkerSelect, isLoaded]);
+  }, [map, markers, selectedMarker, selectedMarkerIds, onMarkerSelect, onMarkerToggle, isLoaded]);
 
   if (!apiKey) {
     return (
