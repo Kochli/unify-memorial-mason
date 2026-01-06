@@ -39,6 +39,7 @@ import { toJobInsert } from '../utils/jobTransform';
 import { useToast } from '@/shared/hooks/use-toast';
 import { useOrdersList, useUpdateOrder } from '@/modules/orders/hooks/useOrders';
 import { useCustomersList } from '@/modules/customers/hooks/useCustomers';
+import { useWorkers, useSetWorkersForJob } from '@/modules/workers/hooks/useWorkers';
 
 interface CreateJobDrawerProps {
   open: boolean;
@@ -62,6 +63,8 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
   const { toast } = useToast();
   const { data: ordersData } = useOrdersList();
   const { data: customers } = useCustomersList();
+  const { data: workers } = useWorkers({ activeOnly: true });
+  const { mutateAsync: setWorkersAsync } = useSetWorkersForJob();
 
   // Filter Orders to show only unassigned ones
   const availableOrders = useMemo(() => {
@@ -73,6 +76,7 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
     defaultValues: {
       order_ids: initialOrderIds,
       assigned_people_ids: [],
+      worker_ids: [],
       location_name: initialLocation,
       address: '',
       latitude: null,
@@ -91,6 +95,7 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
       form.reset({
         order_ids: initialOrderIds,
         assigned_people_ids: [],
+        worker_ids: [],
         location_name: initialLocation,
         address: '',
         latitude: null,
@@ -127,8 +132,18 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
   }, [firstSelectedOrder, open, form, initialLocation]);
 
   const onSubmit = async (values: JobFormData) => {
+    // Validate order_ids for CreateJobDrawer (required for job creation)
+    if (!values.order_ids || values.order_ids.length === 0) {
+      toast({
+        title: 'Validation error',
+        description: 'At least one order is required to create a job.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     // Extract UI-only fields
-    const { order_ids, assigned_people_ids, ...jobData } = values;
+    const { order_ids, assigned_people_ids, worker_ids, ...jobData } = values;
     
     // Build People snapshot text
     let assignedPeopleText = '';
@@ -158,6 +173,11 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
           updateOrderAsync({ id: orderId, updates: { job_id: createdJob.id } })
         )
       );
+      
+      // Assign workers if any selected
+      if (worker_ids && worker_ids.length > 0) {
+        await setWorkersAsync({ jobId: createdJob.id, workerIds: worker_ids });
+      }
       
       toast({
         title: 'Job created',
@@ -269,6 +289,46 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                               className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
                             >
                               {person.first_name} {person.last_name}
+                            </label>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {/* Workers Multi-Select */}
+              <FormField
+                control={form.control}
+                name="worker_ids"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Assigned Workers (Optional)</FormLabel>
+                    <div className="border rounded-md p-4 max-h-60 overflow-y-auto">
+                      {!workers || workers.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No workers available</p>
+                      ) : (
+                        workers.map((worker) => (
+                          <div key={worker.id} className="flex items-center space-x-2 py-2">
+                            <Checkbox
+                              id={`worker-${worker.id}`}
+                              checked={field.value?.includes(worker.id)}
+                              onCheckedChange={(checked) => {
+                                const currentValue = field.value || [];
+                                if (checked) {
+                                  field.onChange([...currentValue, worker.id]);
+                                } else {
+                                  field.onChange(currentValue.filter(id => id !== worker.id));
+                                }
+                              }}
+                            />
+                            <label
+                              htmlFor={`worker-${worker.id}`}
+                              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
+                            >
+                              {worker.full_name} ({worker.role})
                             </label>
                           </div>
                         ))

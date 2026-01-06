@@ -31,6 +31,10 @@ import { useUpdateOrder } from '../hooks/useOrders';
 import { orderFormSchema, type OrderFormData } from '../schemas/order.schema';
 import { useToast } from '@/shared/hooks/use-toast';
 import type { Order } from '../types/orders.types';
+import { useCustomersList } from '@/modules/customers/hooks/useCustomers';
+
+// Sentinel value for "no person selected" in Radix Select (cannot use empty string)
+const NO_PERSON_SENTINEL = '__none__';
 
 interface EditOrderDrawerProps {
   open: boolean;
@@ -45,10 +49,12 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
 }) => {
   const { mutate: updateOrder, isPending } = useUpdateOrder();
   const { toast } = useToast();
+  const { data: customers } = useCustomersList();
 
   const form = useForm<OrderFormData>({
     resolver: zodResolver(orderFormSchema),
     defaultValues: {
+      person_id: order.person_id || null,
       customer_name: order.customer_name,
       customer_email: order.customer_email || '',
       customer_phone: order.customer_phone || '',
@@ -77,6 +83,7 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
   useEffect(() => {
     if (order) {
       form.reset({
+        person_id: order.person_id || null,
         customer_name: order.customer_name,
         customer_email: order.customer_email || '',
         customer_phone: order.customer_phone || '',
@@ -103,9 +110,15 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
   }, [order, form]);
 
   const onSubmit = (data: OrderFormData) => {
+    // Get person name if person_id is selected
+    const selectedCustomer = data.person_id ? customers?.find(c => c.id === data.person_id) : null;
+    const personName = selectedCustomer ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}` : null;
+
     // Convert empty strings to null for optional fields
     const orderData = {
       ...data,
+      person_id: data.person_id || null,
+      person_name: personName,
       customer_email: data.customer_email || null,
       customer_phone: data.customer_phone || null,
       sku: data.sku || null,
@@ -154,16 +167,61 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 p-4">
+            {/* Person Assignment */}
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold">Person Assignment</h3>
+              <FormField
+                control={form.control}
+                name="person_id"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Person (Optional)</FormLabel>
+                    <Select
+                      value={field.value || NO_PERSON_SENTINEL}
+                      onValueChange={(value) => {
+                        if (value === NO_PERSON_SENTINEL) {
+                          field.onChange(null);
+                          form.setValue('person_name', null);
+                        } else {
+                          field.onChange(value);
+                          // Set person_name snapshot
+                          const customer = customers?.find(c => c.id === value);
+                          if (customer) {
+                            form.setValue('person_name', `${customer.first_name} ${customer.last_name}`);
+                          }
+                        }
+                      }}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select person (optional)" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value={NO_PERSON_SENTINEL}>None</SelectItem>
+                        {customers?.map((customer) => (
+                          <SelectItem key={customer.id} value={customer.id}>
+                            {customer.first_name} {customer.last_name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
             {/* Person Information */}
             <div className="space-y-4">
-              <h3 className="text-sm font-semibold">Person Information</h3>
+              <h3 className="text-sm font-semibold">Deceased & Contact Information</h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <FormField
                   control={form.control}
                   name="customer_name"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Person Name *</FormLabel>
+                      <FormLabel>Deceased Name *</FormLabel>
                       <FormControl>
                         <Input placeholder="John Smith" {...field} />
                       </FormControl>

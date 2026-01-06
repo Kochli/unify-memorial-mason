@@ -4,6 +4,10 @@ import type { Order } from '../types/orders.types';
 export interface UIOrder {
   id: string;
   customer: string;
+  deceasedName: string;
+  personId?: string | null; // NEW
+  fallbackPhone?: string | null; // NEW
+  fallbackEmail?: string | null; // NEW
   type: string;
   stoneStatus: string;
   permitStatus: string;
@@ -30,9 +34,18 @@ export interface UIOrder {
  * Transform database order to UI-friendly format
  */
 export function transformOrderForUI(order: Order): UIOrder {
+  // Resolve customer name: prefer person_name, else derive from joined customer, else "—"
+  const customerName = order.person_name 
+    || (order.customers ? `${order.customers.first_name} ${order.customers.last_name}` : null)
+    || '—';
+
   return {
     id: order.id,
-    customer: order.customer_name,
+    customer: customerName, // Person name (resolved)
+    deceasedName: order.customer_name, // Deceased name (from customer_name)
+    personId: order.person_id, // NEW
+    fallbackPhone: order.customer_phone, // NEW
+    fallbackEmail: order.customer_email, // NEW
     type: order.order_type,
     stoneStatus: order.stone_status,
     permitStatus: order.permit_status,

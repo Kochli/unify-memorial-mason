@@ -1,9 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/components/ui/tabs";
 import { Input } from "@/shared/components/ui/input";
-import { Search, Plus, Filter, Calendar, MapPin, Clock, AlertTriangle, Settings } from 'lucide-react';
+import { Search, Plus, Filter, Calendar, MapPin, Clock, AlertTriangle, Settings, Columns } from 'lucide-react';
 import { SortableOrdersTable } from "../components/SortableOrdersTable";
 import { OrderDetailsSidebar } from "../components/OrderDetailsSidebar";
 import { CreateOrderDrawer } from "../components/CreateOrderDrawer";
@@ -12,6 +12,11 @@ import { DeleteOrderDialog } from "../components/DeleteOrderDialog";
 import { useOrdersList } from "@/modules/orders/hooks/useOrders";
 import { transformOrdersForUI, type UIOrder } from "../utils/orderTransform";
 import type { Order } from "../types/orders.types";
+import { ColumnsDialog } from '@/shared/tableViewPresets/components/ColumnsDialog';
+import { usePresetsByModule } from '@/shared/tableViewPresets/hooks/useTableViewPresets';
+import { applyPresetToState, getDefaultState } from '@/shared/tableViewPresets/utils/columnState';
+import { getColumnDefinitions } from '@/shared/tableViewPresets/config/defaultColumns';
+import type { ColumnState } from '@/shared/tableViewPresets/types/tableViewPresets.types';
 
 export const OrdersPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState("all");
@@ -23,8 +28,22 @@ export const OrdersPage: React.FC = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [orderToEdit, setOrderToEdit] = useState<Order | null>(null);
   const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
+  const [columnsDialogOpen, setColumnsDialogOpen] = useState(false);
+  const [columnState, setColumnState] = useState<ColumnState>(() => getDefaultState('orders'));
 
   const { data: ordersData, isLoading, error } = useOrdersList();
+  const { data: presets } = usePresetsByModule('orders');
+
+  // Load default preset on mount
+  useEffect(() => {
+    if (presets) {
+      const defaultPreset = presets.find(p => p.is_default);
+      if (defaultPreset) {
+        const newState = applyPresetToState(defaultPreset.config, 'orders');
+        setColumnState(newState);
+      }
+    }
+  }, [presets]);
 
   // Transform orders from DB format to UI format
   const uiOrders = useMemo(() => {
@@ -74,6 +93,7 @@ export const OrdersPage: React.FC = () => {
                         order.stoneStatus === activeTab || order.permitStatus === activeTab || order.proofStatus === activeTab;
       const matchesSearch = searchQuery === "" || 
                            order.customer.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                           (order.deceasedName && order.deceasedName.toLowerCase().includes(searchQuery.toLowerCase())) ||
                            order.id.toLowerCase().includes(searchQuery.toLowerCase());
       return matchesTab && matchesSearch;
     });
@@ -111,6 +131,10 @@ export const OrdersPage: React.FC = () => {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setColumnsDialogOpen(true)}>
+            <Columns className="h-4 w-4 mr-2" />
+            Columns
+          </Button>
           <Button variant="outline" onClick={() => setViewMode(viewMode === "table" ? "kanban" : "table")}>
             <Settings className="h-4 w-4 mr-2" />
             {viewMode === "table" ? "Kanban View" : "Table View"}
@@ -226,6 +250,8 @@ export const OrdersPage: React.FC = () => {
                   }}
                   onEditOrder={handleEditOrder}
                   onDeleteOrder={handleDeleteOrder}
+                  columnState={columnState}
+                  onColumnStateChange={setColumnState}
                 />
               )}
             </CardContent>
@@ -269,6 +295,16 @@ export const OrdersPage: React.FC = () => {
           order={orderToDelete}
         />
       )}
+
+      {/* Columns Dialog */}
+      <ColumnsDialog
+        module="orders"
+        open={columnsDialogOpen}
+        onOpenChange={setColumnsDialogOpen}
+        columnState={columnState}
+        onColumnStateChange={setColumnState}
+        availableColumns={getColumnDefinitions('orders')}
+      />
     </div>
   );
 };

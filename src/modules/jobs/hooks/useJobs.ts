@@ -27,15 +27,37 @@ export const jobsKeys = {
   detail: (id: string) => ['jobs', id] as const,
 };
 
-async function fetchJobs() {
-  const { data, error } = await supabase
+async function fetchJobs(options?: { workerIds?: string[] }) {
+  let query = supabase
     .from('jobs')
     .select('*')
     .order('scheduled_date', { ascending: true, nullsFirst: false })
     .order('created_at', { ascending: false });
-  
+
+  // Filter by worker assignments if provided
+  // Explicit guard: only filter if workerIds exist, is array, and has items
+  if (options?.workerIds && Array.isArray(options.workerIds) && options.workerIds.length > 0) {
+    // Get job IDs that have any of the specified workers assigned
+    const { data: jobWorkers, error: jobWorkersError } = await supabase
+      .from('job_workers')
+      .select('job_id')
+      .in('worker_id', options.workerIds);
+
+    if (jobWorkersError) throw jobWorkersError;
+
+    const jobIds = jobWorkers?.map(jw => jw.job_id) || [];
+    if (jobIds.length > 0) {
+      query = query.in('id', jobIds);
+    } else {
+      // No jobs found with these workers, return empty array
+      return [] as Job[];
+    }
+  }
+
+  const { data, error } = await query;
   if (error) throw error;
-  return data as Job[];
+  // Ensure always returns array (never undefined)
+  return (data || []) as Job[];
 }
 
 async function fetchJob(id: string) {
@@ -83,10 +105,10 @@ async function deleteJob(id: string) {
   if (error) throw error;
 }
 
-export function useJobsList() {
+export function useJobsList(options?: { workerIds?: string[] }) {
   return useQuery({
-    queryKey: jobsKeys.all,
-    queryFn: fetchJobs,
+    queryKey: [...jobsKeys.all, options],
+    queryFn: () => fetchJobs(options),
   });
 }
 

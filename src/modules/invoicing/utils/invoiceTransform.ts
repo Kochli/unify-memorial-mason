@@ -34,7 +34,7 @@ export function transformInvoiceForUI(invoice: Invoice): UIInvoice {
   return {
     id: invoice.id,
     invoiceNumber: invoice.invoice_number,
-    orderId: invoice.order_id,
+    orderId: invoice.order_id ?? null, // Handle undefined: always string | null, never undefined
     customer: invoice.customer_name || 'No person assigned',
     amount: `$${invoice.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     status: displayStatus,
@@ -51,6 +51,17 @@ export function transformInvoiceForUI(invoice: Invoice): UIInvoice {
  * Transform array of database invoices to UI format
  */
 export function transformInvoicesForUI(invoices: Invoice[]): UIInvoice[] {
+  // DEV-only runtime validation to diagnose missing order_id
+  if (import.meta.env.DEV && invoices && invoices.length > 0) {
+    const firstInvoice = invoices[0];
+    if (!('order_id' in firstInvoice)) {
+      console.warn('[Invoicing] order_id missing from invoice data:', firstInvoice);
+    }
+    if (firstInvoice.order_id === undefined) {
+      console.warn('[Invoicing] order_id is undefined (should be null or string):', firstInvoice);
+    }
+  }
+  
   return invoices.map(transformInvoiceForUI);
 }
 

@@ -14,6 +14,7 @@ import { InscriptionsPage } from "@/modules/inscriptions";
 import { PaymentsPage } from "@/modules/payments";
 import { NotificationsPage } from "@/modules/notifications";
 import { TeamChatPage } from "@/modules/team";
+import { WorkersPage } from "@/modules/workers";
 import NotFound from "@/pages/NotFound";
 
 export function AppRouter() {
@@ -34,6 +35,7 @@ export function AppRouter() {
         <Route path="reporting" element={<ReportingPage />} />
         <Route path="notifications" element={<NotificationsPage />} />
         <Route path="team" element={<TeamChatPage />} />
+        <Route path="workers" element={<WorkersPage />} />
       </Route>
       <Route path="*" element={<NotFound />} />
     </Routes>

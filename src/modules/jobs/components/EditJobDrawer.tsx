@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
@@ -37,6 +37,10 @@ import { jobFormSchema, type JobFormData } from '../schemas/job.schema';
 import { toJobUpdate } from '../utils/jobTransform';
 import { useToast } from '@/shared/hooks/use-toast';
 import { useOrdersList } from '@/modules/orders/hooks/useOrders';
+import { useWorkersByJob } from '@/modules/workers/hooks/useWorkers';
+import { AssignWorkersDialog } from './AssignWorkersDialog';
+import { Badge } from '@/shared/components/ui/badge';
+import { UserCog } from 'lucide-react';
 
 interface EditJobDrawerProps {
   open: boolean;
@@ -52,28 +56,61 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
   const { mutate: updateJob, isPending } = useUpdateJob();
   const { toast } = useToast();
   const { data: ordersData } = useOrdersList();
+  const { data: assignedWorkers } = useWorkersByJob(job.id);
+  const [assignDialogOpen, setAssignDialogOpen] = React.useState(false);
+
+  // Compute default values with proper schema structure
+  // order_ids can be empty array for EditJobDrawer (jobs may have no orders)
+  const defaultValues = useMemo(() => {
+    try {
+      return {
+        order_ids: job.order_id ? [job.order_id] : [],
+        worker_ids: assignedWorkers?.map(w => w.id) || [],
+        assigned_people_ids: [],
+        customer_name: job.customer_name || '',
+        location_name: job.location_name || '',
+        address: job.address || '',
+        latitude: job.latitude ?? null,
+        longitude: job.longitude ?? null,
+        status: job.status || 'scheduled',
+        scheduled_date: job.scheduled_date || null,
+        estimated_duration: job.estimated_duration || '',
+        priority: job.priority || 'medium',
+        notes: job.notes || '',
+      };
+    } catch (error) {
+      console.error('Error computing default values:', error);
+      // Return safe defaults
+      return {
+        order_ids: [],
+        worker_ids: [],
+        assigned_people_ids: [],
+        customer_name: '',
+        location_name: '',
+        address: '',
+        latitude: null,
+        longitude: null,
+        status: 'scheduled',
+        scheduled_date: null,
+        estimated_duration: '',
+        priority: 'medium',
+        notes: '',
+      };
+    }
+  }, [job, assignedWorkers]);
 
   const form = useForm<JobFormData>({
     resolver: zodResolver(jobFormSchema),
-    defaultValues: {
-      order_id: job.order_id || null,
-      customer_name: job.customer_name,
-      location_name: job.location_name,
-      address: job.address,
-      latitude: job.latitude || null,
-      longitude: job.longitude || null,
-      status: job.status,
-      scheduled_date: job.scheduled_date || null,
-      estimated_duration: job.estimated_duration || '',
-      priority: job.priority,
-      notes: job.notes || '',
-    },
+    defaultValues,
+    mode: 'onBlur', // Only validate on blur, not on mount or change
   });
 
-  // Reset form when job changes
+  // Reset form when job or assignedWorkers changes
   useEffect(() => {
     form.reset({
-      order_id: job.order_id || null,
+      order_ids: job.order_id ? [job.order_id] : [],
+      worker_ids: assignedWorkers?.map(w => w.id) || [],
+      assigned_people_ids: [],
       customer_name: job.customer_name,
       location_name: job.location_name,
       address: job.address,
@@ -85,10 +122,11 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
       priority: job.priority,
       notes: job.notes || '',
     });
-  }, [job, form]);
+  }, [job, assignedWorkers, form]);
 
-  // Auto-fill customer and location when order is selected
-  const selectedOrderId = form.watch('order_id');
+  // Auto-fill customer and location when order is selected (using first order_id from order_ids array)
+  const selectedOrderIds = form.watch('order_ids');
+  const selectedOrderId = selectedOrderIds && selectedOrderIds.length > 0 ? selectedOrderIds[0] : null;
   const selectedOrder = ordersData?.find((o) => o.id === selectedOrderId);
 
   useEffect(() => {
@@ -134,38 +172,9 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
         </DrawerHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 px-4">
-            <FormField
-              control={form.control}
-              name="order_id"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Order (Optional)</FormLabel>
-                  <Select
-                    onValueChange={(value) => {
-                      field.onChange(value === '__none__' ? null : value);
-                    }}
-                    value={field.value ?? '__none__'}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select an order" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="__none__">None</SelectItem>
-                      {Array.isArray(ordersData) && ordersData.length > 0
-                        ? ordersData.map((order) => (
-                            <SelectItem key={order.id} value={order.id}>
-                              {order.id} - {order.customer_name || 'Unknown'}
-                            </SelectItem>
-                          ))
-                        : null}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            {/* Note: order_ids is UI-only field for CreateJobDrawer. 
+                EditJobDrawer doesn't need to edit orders, but we keep it in form for schema compatibility.
+                The order_id from job is already set in defaultValues. */}
 
             <FormField
               control={form.control}
@@ -390,6 +399,51 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
               )}
             />
 
+            {/* Workers Section */}
+            <div className="space-y-2 pt-4 border-t">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <UserCog className="h-4 w-4" />
+                  <FormLabel>Assigned Workers</FormLabel>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setAssignDialogOpen(true)}
+                >
+                  Assign Workers
+                </Button>
+              </div>
+              {assignedWorkers && assignedWorkers.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {assignedWorkers.map((worker) => {
+                    const initials = worker.full_name
+                      .split(' ')
+                      .map(n => n[0])
+                      .join('')
+                      .toUpperCase()
+                      .slice(0, 2);
+                    return (
+                      <Badge
+                        key={worker.id}
+                        variant="secondary"
+                        className="h-8 px-3 flex items-center gap-2"
+                      >
+                        <span className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center text-xs">
+                          {initials}
+                        </span>
+                        <span>{worker.full_name}</span>
+                        <span className="text-xs opacity-70">({worker.role})</span>
+                      </Badge>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">No workers assigned</p>
+              )}
+            </div>
+
             <DrawerFooter>
               <Button type="submit" disabled={isPending}>
                 {isPending ? 'Updating...' : 'Update Job'}
@@ -405,6 +459,11 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
             </DrawerFooter>
           </form>
         </Form>
+        <AssignWorkersDialog
+          open={assignDialogOpen}
+          onOpenChange={setAssignDialogOpen}
+          jobId={job.id}
+        />
       </DrawerContent>
     </Drawer>
   );

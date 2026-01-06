@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const orderFormSchema = z.object({
+  person_id: z.string().uuid().optional().nullable(),
   customer_name: z.string().min(1, 'Deceased name is required'),
   customer_email: z.string().email('Invalid email').optional().or(z.literal('')),
   customer_phone: z.string().optional().or(z.literal('')),

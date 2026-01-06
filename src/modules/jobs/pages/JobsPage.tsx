@@ -12,12 +12,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/shared/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/shared/components/ui/popover';
+import { Checkbox } from '@/shared/components/ui/checkbox';
+import { UserCog, X } from 'lucide-react';
 import { Search, Plus, Hammer, RefreshCw, Pencil, Trash2 } from 'lucide-react';
 import { useJobsList, type Job } from '../hooks/useJobs';
 import { transformJobsFromDb, type UIJob } from '../utils/jobTransform';
 import { CreateJobDrawer } from '../components/CreateJobDrawer';
 import { EditJobDrawer } from '../components/EditJobDrawer';
 import { DeleteJobDialog } from '../components/DeleteJobDialog';
+import { useWorkers, useWorkersByJobs } from '@/modules/workers/hooks/useWorkers';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/components/ui/tooltip';
 import { format } from 'date-fns';
 
 const getStatusBadgeColor = (status: string) => {
@@ -55,19 +60,27 @@ const formatStatus = (status: string) => {
 };
 
 export const JobsPage: React.FC = () => {
-  const { data: jobsData, isLoading, error, refetch } = useJobsList();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [selectedWorkerIds, setSelectedWorkerIds] = useState<string[]>([]);
   const [createDrawerOpen, setCreateDrawerOpen] = useState(false);
   const [editDrawerOpen, setEditDrawerOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [jobToEdit, setJobToEdit] = useState<Job | null>(null);
   const [jobToDelete, setJobToDelete] = useState<Job | null>(null);
+  
+  const { data: jobsData, isLoading, error, refetch } = useJobsList({
+    workerIds: selectedWorkerIds.length > 0 ? selectedWorkerIds : undefined,
+  });
+  const { data: workers } = useWorkers({ activeOnly: true });
+
+  // Guard jobsData to always be an array
+  const jobs = useMemo(() => jobsData || [], [jobsData]);
 
   const uiJobs = useMemo<UIJob[]>(() => {
-    if (!jobsData) return [];
-    return transformJobsFromDb(jobsData);
-  }, [jobsData]);
+    if (!jobs || jobs.length === 0) return [];
+    return transformJobsFromDb(jobs);
+  }, [jobs]);
 
   const filteredJobs = useMemo(() => {
     let filtered = uiJobs;
@@ -92,8 +105,12 @@ export const JobsPage: React.FC = () => {
     return filtered;
   }, [uiJobs, searchQuery, statusFilter]);
 
+  // Fetch workers for visible jobs (batch fetch)
+  const jobIds = useMemo(() => filteredJobs.map(j => j.id), [filteredJobs]);
+  const { data: workersByJobId, isLoading: isLoadingWorkers } = useWorkersByJobs(jobIds);
+
   const handleEdit = (jobId: string) => {
-    const dbJob = jobsData?.find((j) => j.id === jobId);
+    const dbJob = jobs.find((j) => j.id === jobId);
     if (dbJob) {
       setJobToEdit(dbJob);
       setEditDrawerOpen(true);
@@ -101,7 +118,7 @@ export const JobsPage: React.FC = () => {
   };
 
   const handleDelete = (jobId: string) => {
-    const dbJob = jobsData?.find((j) => j.id === jobId);
+    const dbJob = jobs.find((j) => j.id === jobId);
     if (dbJob) {
       setJobToDelete(dbJob);
       setDeleteDialogOpen(true);
@@ -142,7 +159,7 @@ export const JobsPage: React.FC = () => {
             <Hammer className="h-10 w-10 text-slate-400 mx-auto" />
             <div className="text-lg font-medium">No jobs found</div>
             <div className="text-sm text-slate-600">
-              {searchQuery || statusFilter !== 'all'
+              {searchQuery || statusFilter !== 'all' || selectedWorkerIds.length > 0
                 ? 'Try adjusting your search or filters.'
                 : 'Create your first job to get started.'}
             </div>
@@ -167,6 +184,7 @@ export const JobsPage: React.FC = () => {
             <TableHead>Status</TableHead>
             <TableHead>Scheduled Date</TableHead>
             <TableHead>Priority</TableHead>
+            <TableHead>Workers</TableHead>
             <TableHead>Duration</TableHead>
             <TableHead>Created</TableHead>
             <TableHead className="text-right">Actions</TableHead>
@@ -200,6 +218,49 @@ export const JobsPage: React.FC = () => {
                 <span className={getPriorityColor(job.priority)}>
                   {job.priority.charAt(0).toUpperCase() + job.priority.slice(1)}
                 </span>
+              </TableCell>
+              <TableCell>
+                {isLoadingWorkers ? (
+                  <Skeleton className="h-6 w-20" />
+                ) : (() => {
+                  const workers = workersByJobId?.[job.id] ?? [];
+                  if (workers.length === 0) {
+                    return <span className="text-muted-foreground">—</span>;
+                  }
+                  
+                  return (
+                    <div className="flex flex-wrap gap-1">
+                      {workers.slice(0, 3).map((worker) => {
+                        const initials = worker.full_name
+                          .split(' ')
+                          .map(n => n[0])
+                          .join('')
+                          .toUpperCase()
+                          .slice(0, 2);
+                        return (
+                          <Tooltip key={worker.id}>
+                            <TooltipTrigger asChild>
+                              <Badge variant="secondary" className="h-6 px-2 text-xs">
+                                <span className="h-4 w-4 rounded-full bg-primary/10 flex items-center justify-center text-[10px] mr-1">
+                                  {initials}
+                                </span>
+                                {worker.full_name}
+                              </Badge>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {worker.full_name} ({worker.role})
+                            </TooltipContent>
+                          </Tooltip>
+                        );
+                      })}
+                      {workers.length > 3 && (
+                        <Badge variant="outline" className="h-6 px-2 text-xs">
+                          +{workers.length - 3} more
+                        </Badge>
+                      )}
+                    </div>
+                  );
+                })()}
               </TableCell>
               <TableCell>{job.estimatedDuration || '-'}</TableCell>
               <TableCell className="text-sm text-slate-600">
@@ -283,7 +344,80 @@ export const JobsPage: React.FC = () => {
                 <SelectItem value="cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="w-[180px] justify-start">
+                  <UserCog className="h-4 w-4 mr-2" />
+                  {selectedWorkerIds.length > 0
+                    ? `${selectedWorkerIds.length} worker${selectedWorkerIds.length !== 1 ? 's' : ''}`
+                    : 'Filter by worker'}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[300px] p-0" align="end">
+                <div className="p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-medium text-sm">Filter by Worker</h4>
+                    {selectedWorkerIds.length > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSelectedWorkerIds([])}
+                        className="h-6 px-2 text-xs"
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                  <div className="border rounded-md p-2 max-h-60 overflow-y-auto space-y-2">
+                    {!workers || workers.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No workers available</p>
+                    ) : (
+                      workers.map((worker) => (
+                        <div key={worker.id} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`filter-worker-${worker.id}`}
+                            checked={selectedWorkerIds.includes(worker.id)}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setSelectedWorkerIds([...selectedWorkerIds, worker.id]);
+                              } else {
+                                setSelectedWorkerIds(selectedWorkerIds.filter(id => id !== worker.id));
+                              }
+                            }}
+                          />
+                          <label
+                            htmlFor={`filter-worker-${worker.id}`}
+                            className="text-sm font-medium leading-none cursor-pointer flex-1"
+                          >
+                            {worker.full_name} ({worker.role})
+                          </label>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
+          {selectedWorkerIds.length > 0 && workers && (
+            <div className="flex flex-wrap gap-2 mb-4">
+              {selectedWorkerIds.map((workerId) => {
+                const worker = workers?.find(w => w.id === workerId);
+                if (!worker) return null;
+                return (
+                  <Badge key={workerId} variant="secondary" className="gap-1">
+                    {worker.full_name}
+                    <button
+                      onClick={() => setSelectedWorkerIds(selectedWorkerIds.filter(id => id !== workerId))}
+                      className="ml-1 hover:bg-secondary-foreground/20 rounded-full p-0.5"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                );
+              })}
+            </div>
+          )}
           {renderTable()}
         </CardContent>
       </Card>

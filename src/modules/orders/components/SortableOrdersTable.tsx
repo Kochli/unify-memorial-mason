@@ -1,50 +1,41 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/components/ui/table";
 import { Button } from "@/shared/components/ui/button";
-import { Badge } from "@/shared/components/ui/badge";
-import { ArrowUpDown, ArrowUp, ArrowDown, GripVertical, AlertTriangle, Edit, Trash2 } from 'lucide-react';
+import { Edit, Trash2 } from 'lucide-react';
 import { useMessageCountsByOrders } from '@/modules/inbox/hooks/useMessages';
-
-interface Order {
-  id: string;
-  customer: string;
-  type: string;
-  stoneStatus: string;
-  permitStatus: string;
-  proofStatus: string;
-  dueDate: string;
-  depositDate: string;
-  secondPaymentDate: string | null;
-  installationDate: string | null;
-  value: string;
-  location: string;
-  progress: number;
-  assignedTo: string;
-  priority: string;
-  sku: string;
-  material: string;
-  color: string;
-  timelineWeeks: number;
-}
+import { orderColumnDefinitions } from './orderColumnDefinitions';
+import type { UIOrder } from '../utils/orderTransform';
+import type { ColumnState } from '@/shared/tableViewPresets/types/tableViewPresets.types';
 
 interface SortConfig {
-  key: keyof Order;
+  key: string;
   direction: 'asc' | 'desc';
 }
 
 interface SortableOrdersTableProps {
-  orders: Order[];
-  onOrderUpdate?: (orderId: string, updates: Partial<Order>) => void;
-  onViewOrder?: (order: Order) => void;
-  onEditOrder?: (order: Order) => void;
-  onDeleteOrder?: (order: Order) => void;
+  orders: UIOrder[];
+  onOrderUpdate?: (orderId: string, updates: Partial<UIOrder>) => void;
+  onViewOrder?: (order: UIOrder) => void;
+  onEditOrder?: (order: UIOrder) => void;
+  onDeleteOrder?: (order: UIOrder) => void;
+  columnState: ColumnState;
+  onColumnStateChange?: (state: ColumnState) => void;
 }
 
-export const SortableOrdersTable: React.FC<SortableOrdersTableProps> = ({ orders, onOrderUpdate, onViewOrder, onEditOrder, onDeleteOrder }) => {
+export const SortableOrdersTable: React.FC<SortableOrdersTableProps> = ({ 
+  orders, 
+  onOrderUpdate, 
+  onViewOrder, 
+  onEditOrder, 
+  onDeleteOrder,
+  columnState,
+  onColumnStateChange,
+}) => {
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
-  const [columnOrder] = useState([
-    'id', 'customer', 'type', 'stoneStatus', 'progress', 'depositDate', 'installationDate', 'dueDate', 'value', 'messages'
-  ]);
+  const [resizingColumn, setResizingColumn] = useState<string | null>(null);
+  const [resizeStartX, setResizeStartX] = useState(0);
+  const [resizeStartWidth, setResizeStartWidth] = useState(0);
+  const resizeRef = useRef<HTMLDivElement>(null);
 
   // Extract order IDs for batch fetching
   const orderIds = React.useMemo(() => orders.map(order => order.id), [orders]);
@@ -57,28 +48,6 @@ export const SortableOrdersTable: React.FC<SortableOrdersTableProps> = ({ orders
     return messageCounts || {};
   }, [messageCounts]);
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "NA": return "bg-gray-100 text-gray-700";
-      case "Ordered": return "bg-blue-100 text-blue-700";
-      case "In Stock": return "bg-green-100 text-green-700";
-      case "form_sent": return "bg-yellow-100 text-yellow-700";
-      case "customer_completed": return "bg-blue-100 text-blue-700";
-      case "pending": return "bg-orange-100 text-orange-700";
-      case "approved": return "bg-green-100 text-green-700";
-      case "Not_Received": return "bg-red-100 text-red-700";
-      case "Received": return "bg-blue-100 text-blue-700";
-      case "In_Progress": return "bg-yellow-100 text-yellow-700";
-      case "Lettered": return "bg-green-100 text-green-700";
-      default: return "bg-gray-100 text-gray-700";
-    }
-  };
-
-  const getPriorityIcon = (priority: string) => {
-    if (priority === "high") return <AlertTriangle className="h-4 w-4 text-red-500" />;
-    return null;
-  };
-
   const getDaysUntilDue = (dueDate: string) => {
     if (!dueDate) return Infinity;
     const today = new Date();
@@ -88,36 +57,100 @@ export const SortableOrdersTable: React.FC<SortableOrdersTableProps> = ({ orders
     return diffDays;
   };
 
-  const handleSort = (key: keyof Order) => {
+  const handleSort = (columnId: string) => {
+    const column = orderColumnDefinitions.find(col => col.id === columnId);
+    if (!column || !column.sortable) return;
+
     let direction: 'asc' | 'desc' = 'asc';
-    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+    if (sortConfig && sortConfig.key === columnId && sortConfig.direction === 'asc') {
       direction = 'desc';
     }
-    setSortConfig({ key, direction });
+    setSortConfig({ key: columnId, direction });
   };
 
-  const getSortIcon = (columnKey: keyof Order) => {
-    if (!sortConfig || sortConfig.key !== columnKey) {
-      return <ArrowUpDown className="h-4 w-4" />;
-    }
-    return sortConfig.direction === 'asc' ? 
-      <ArrowUp className="h-4 w-4" /> : 
-      <ArrowDown className="h-4 w-4" />;
+  const getSortDirection = (columnId: string): 'asc' | 'desc' | null => {
+    if (!sortConfig || sortConfig.key !== columnId) return null;
+    return sortConfig.direction;
   };
+
+  // Get visible columns in order
+  const visibleColumns = React.useMemo(() => {
+    return orderColumnDefinitions
+      .filter(col => columnState.visibility[col.id] !== false)
+      .sort((a, b) => {
+        const aIndex = columnState.order.indexOf(a.id);
+        const bIndex = columnState.order.indexOf(b.id);
+        if (aIndex === -1 && bIndex === -1) return 0;
+        if (aIndex === -1) return 1;
+        if (bIndex === -1) return -1;
+        return aIndex - bIndex;
+      });
+  }, [columnState]);
 
   const sortedOrders = React.useMemo(() => {
     if (!sortConfig) return orders;
 
     return [...orders].sort((a, b) => {
-      const aValue = a[sortConfig.key];
-      const bValue = b[sortConfig.key];
+      const column = orderColumnDefinitions.find(col => col.id === sortConfig.key);
+      if (!column) return 0;
 
+      let aValue: string | number | null | undefined;
+      let bValue: string | number | null | undefined;
+
+      // Map column ID to order property
+      switch (sortConfig.key) {
+        case 'id':
+          aValue = a.id;
+          bValue = b.id;
+          break;
+        case 'customer':
+          aValue = a.customer;
+          bValue = b.customer;
+          break;
+        case 'deceasedName':
+          aValue = a.deceasedName;
+          bValue = b.deceasedName;
+          break;
+        case 'type':
+          aValue = a.type;
+          bValue = b.type;
+          break;
+        case 'stoneStatus':
+          aValue = a.stoneStatus;
+          bValue = b.stoneStatus;
+          break;
+        case 'progress':
+          aValue = a.progress;
+          bValue = b.progress;
+          break;
+        case 'depositDate':
+          aValue = a.depositDate;
+          bValue = b.depositDate;
+          break;
+        case 'installationDate':
+          aValue = a.installationDate;
+          bValue = b.installationDate;
+          break;
+        case 'dueDate':
+          aValue = a.dueDate;
+          bValue = b.dueDate;
+          break;
+        case 'value':
+          aValue = a.value;
+          bValue = b.value;
+          break;
+        default:
+          return 0;
+      }
+
+      // Handle numeric sorting
       if (sortConfig.key === 'progress') {
         return sortConfig.direction === 'asc' 
           ? (aValue as number) - (bValue as number)
           : (bValue as number) - (aValue as number);
       }
 
+      // Handle date sorting
       if (sortConfig.key === 'dueDate' || sortConfig.key === 'depositDate' || sortConfig.key === 'installationDate') {
         const aDate = new Date(aValue as string);
         const bDate = new Date(bValue as string);
@@ -126,6 +159,7 @@ export const SortableOrdersTable: React.FC<SortableOrdersTableProps> = ({ orders
           : bDate.getTime() - aDate.getTime();
       }
 
+      // Handle string sorting
       const aStr = String(aValue).toLowerCase();
       const bStr = String(bValue).toLowerCase();
       
@@ -137,50 +171,75 @@ export const SortableOrdersTable: React.FC<SortableOrdersTableProps> = ({ orders
     });
   }, [orders, sortConfig]);
 
-  const getColumnTitle = (key: string) => {
-    const titles: Record<string, string> = {
-      id: 'Order ID',
-      customer: 'Customer',
-      type: 'Type',
-      stoneStatus: 'Stone Status',
-      progress: 'Progress',
-      depositDate: 'Deposit Date',
-      installationDate: 'Installation Date',
-      dueDate: 'Due Date',
-      value: 'Value',
-      messages: 'Messages'
-    };
-    return titles[key] || key;
-  };
+  // Column resizing handlers
+  const handleResizeStart = useCallback((columnId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setResizingColumn(columnId);
+    setResizeStartX(e.clientX);
+    setResizeStartWidth(columnState.widths[columnId] || orderColumnDefinitions.find(col => col.id === columnId)?.defaultWidth || 100);
+  }, [columnState.widths]);
+
+  const handleResizeMove = useCallback((e: MouseEvent) => {
+    if (!resizingColumn || !onColumnStateChange) return;
+
+    const diff = e.clientX - resizeStartX;
+    const newWidth = Math.max(50, resizeStartWidth + diff);
+
+    onColumnStateChange({
+      ...columnState,
+      widths: {
+        ...columnState.widths,
+        [resizingColumn]: newWidth,
+      },
+    });
+  }, [resizingColumn, resizeStartX, resizeStartWidth, columnState, onColumnStateChange]);
+
+  const handleResizeEnd = useCallback(() => {
+    setResizingColumn(null);
+  }, []);
+
+  React.useEffect(() => {
+    if (resizingColumn) {
+      document.addEventListener('mousemove', handleResizeMove);
+      document.addEventListener('mouseup', handleResizeEnd);
+      return () => {
+        document.removeEventListener('mousemove', handleResizeMove);
+        document.removeEventListener('mouseup', handleResizeEnd);
+      };
+    }
+  }, [resizingColumn, handleResizeMove, handleResizeEnd]);
 
   return (
     <div className="rounded-md border">
       <Table>
         <TableHeader>
           <TableRow>
-            {columnOrder.map((columnKey) => (
-              <TableHead key={columnKey} className="relative">
-                {columnKey === 'messages' ? (
-                  <div className="flex items-center gap-2">
-                    <GripVertical className="h-3 w-3 text-slate-400" />
-                    {getColumnTitle(columnKey)}
-                    {/* No sort icon for messages column */}
-                  </div>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    onClick={() => handleSort(columnKey as keyof Order)}
-                    className="h-auto p-0 font-medium hover:bg-transparent"
-                  >
-                    <div className="flex items-center gap-2">
-                      <GripVertical className="h-3 w-3 text-slate-400" />
-                      {getColumnTitle(columnKey)}
-                      {getSortIcon(columnKey as keyof Order)}
-                    </div>
-                  </Button>
-                )}
-              </TableHead>
-            ))}
+            {visibleColumns.map((column) => {
+              const width = columnState.widths[column.id] || column.defaultWidth;
+              const sortDirection = getSortDirection(column.id);
+              
+              return (
+                <TableHead 
+                  key={column.id} 
+                  className="relative"
+                  style={{ width: `${width}px`, minWidth: `${width}px` }}
+                >
+                  {column.renderHeader({
+                    onSort: column.sortable ? () => handleSort(column.id) : undefined,
+                    sortDirection,
+                  })}
+                  {onColumnStateChange && (
+                    <div
+                      ref={resizeRef}
+                      className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-blue-500 bg-transparent"
+                      onMouseDown={(e) => handleResizeStart(column.id, e)}
+                      style={{ zIndex: 10 }}
+                    />
+                  )}
+                </TableHead>
+              );
+            })}
             <TableHead>Actions</TableHead>
           </TableRow>
         </TableHeader>
@@ -189,81 +248,27 @@ export const SortableOrdersTable: React.FC<SortableOrdersTableProps> = ({ orders
             const daysUntilDue = getDaysUntilDue(order.dueDate);
             return (
               <TableRow key={order.id} className="hover:bg-slate-50">
-                {columnOrder.map((columnKey) => {
-                  switch (columnKey) {
-                    case 'messages': {
-                      const count = messageCountMap[order.id] || 0;
-                      return (
-                        <TableCell key={columnKey}>
-                          {isLoadingCounts ? (
-                            <span className="text-xs text-slate-400">-</span>
-                          ) : (
-                            <Badge variant="outline" className="text-xs">
-                              {count} {count === 1 ? 'message' : 'messages'}
-                            </Badge>
-                          )}
-                        </TableCell>
-                      );
-                    }
-                    case 'id':
-                      return (
-                        <TableCell key={columnKey} className="font-medium">
-                          <div className="flex items-center gap-2">
-                            {getPriorityIcon(order.priority)}
-                            {order.id}
-                          </div>
-                        </TableCell>
-                      );
-                    case 'stoneStatus':
-                      return (
-                        <TableCell key={columnKey}>
-                          <Badge className={getStatusColor(order.stoneStatus)}>
-                            {order.stoneStatus.replace('_', ' ')}
-                          </Badge>
-                        </TableCell>
-                      );
-                    case 'progress':
-                      return (
-                        <TableCell key={columnKey}>
-                          <div className="flex items-center gap-2">
-                            <div className="w-16 bg-gray-200 rounded-full h-2">
-                              <div 
-                                className="bg-blue-600 h-2 rounded-full" 
-                                style={{ width: `${order.progress}%` }}
-                              ></div>
-                            </div>
-                            <span className="text-xs text-slate-600">{order.progress}%</span>
-                          </div>
-                        </TableCell>
-                      );
-                    case 'installationDate':
-                      return (
-                        <TableCell key={columnKey}>
-                          <div className="text-sm">
-                            {order.installationDate || (
-                              <span className="text-slate-400 italic">Not scheduled</span>
-                            )}
-                          </div>
-                        </TableCell>
-                      );
-                    case 'dueDate':
-                      return (
-                        <TableCell key={columnKey}>
-                          <div className="flex flex-col">
-                            <span className="text-sm">{order.dueDate}</span>
-                            <span className={`text-xs ${daysUntilDue < 0 ? 'text-red-600' : daysUntilDue < 7 ? 'text-yellow-600' : 'text-slate-600'}`}>
-                              {daysUntilDue < 0 ? `${Math.abs(daysUntilDue)} days overdue` : `${daysUntilDue} days left`}
-                            </span>
-                          </div>
-                        </TableCell>
-                      );
-                    default:
-                      return (
-                        <TableCell key={columnKey}>
-                          {order[columnKey as keyof Order]}
-                        </TableCell>
-                      );
+                {visibleColumns.map((column) => {
+                  const width = columnState.widths[column.id] || column.defaultWidth;
+                  const cell = column.renderCell(order, {
+                    messageCount: messageCountMap[order.id] || 0,
+                    isLoadingCounts,
+                    daysUntilDue,
+                  });
+                  
+                  // Apply width to the cell
+                  if (React.isValidElement(cell)) {
+                    return React.cloneElement(cell, {
+                      key: column.id,
+                      style: { 
+                        ...(cell.props.style || {}),
+                        width: `${width}px`, 
+                        minWidth: `${width}px`,
+                        maxWidth: `${width}px`,
+                      },
+                    });
                   }
+                  return cell;
                 })}
                 <TableCell>
                   <div className="flex items-center gap-2">
@@ -307,4 +312,3 @@ export const SortableOrdersTable: React.FC<SortableOrdersTableProps> = ({ orders
 };
 
 export default SortableOrdersTable;
-

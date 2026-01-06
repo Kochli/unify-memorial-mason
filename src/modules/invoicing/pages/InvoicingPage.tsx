@@ -1,11 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/components/ui/tabs";
 import { Input } from "@/shared/components/ui/input";
-import { Search, Plus, Download, Send, Eye, AlertCircle, DollarSign, TrendingUp, Edit, Trash2, ChevronRight, ChevronDown } from 'lucide-react';
+import { Search, Plus, Download, Send, Eye, AlertCircle, DollarSign, TrendingUp, Edit, Trash2, ChevronRight, ChevronDown, Columns } from 'lucide-react';
 import { useInvoicesList } from '../hooks/useInvoices';
 import { transformInvoicesForUI, type UIInvoice } from '../utils/invoiceTransform';
 import { CreateInvoiceDrawer } from '../components/CreateInvoiceDrawer';
@@ -13,7 +13,14 @@ import { EditInvoiceDrawer } from '../components/EditInvoiceDrawer';
 import { DeleteInvoiceDialog } from '../components/DeleteInvoiceDialog';
 import { InvoiceDetailSidebar } from '../components/InvoiceDetailSidebar';
 import { ExpandedInvoiceOrders } from '../components/ExpandedInvoiceOrders';
+import { CustomerDetailsPopover } from '@/shared/components/customer/CustomerDetailsPopover';
 import type { Invoice } from '../types/invoicing.types';
+import { ColumnsDialog } from '@/shared/tableViewPresets/components/ColumnsDialog';
+import { usePresetsByModule } from '@/shared/tableViewPresets/hooks/useTableViewPresets';
+import { applyPresetToState, getDefaultState } from '@/shared/tableViewPresets/utils/columnState';
+import { getColumnDefinitions } from '@/shared/tableViewPresets/config/defaultColumns';
+import type { ColumnState } from '@/shared/tableViewPresets/types/tableViewPresets.types';
+import { invoiceColumnDefinitions } from '../components/invoiceColumnDefinitions';
 
 export const InvoicingPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState("all");
@@ -25,8 +32,26 @@ export const InvoicingPage: React.FC = () => {
   const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [expandedInvoices, setExpandedInvoices] = useState<Set<string>>(new Set());
+  const [columnsDialogOpen, setColumnsDialogOpen] = useState(false);
+  const [columnState, setColumnState] = useState<ColumnState>(() => getDefaultState('invoices'));
+  const [resizingColumn, setResizingColumn] = useState<string | null>(null);
+  const [resizeStartX, setResizeStartX] = useState(0);
+  const [resizeStartWidth, setResizeStartWidth] = useState(0);
+  const resizeRef = useRef<HTMLDivElement>(null);
 
   const { data: invoicesData, isLoading, error } = useInvoicesList();
+  const { data: presets } = usePresetsByModule('invoices');
+
+  // Load default preset on mount
+  useEffect(() => {
+    if (presets) {
+      const defaultPreset = presets.find(p => p.is_default);
+      if (defaultPreset) {
+        const newState = applyPresetToState(defaultPreset.config, 'invoices');
+        setColumnState(newState);
+      }
+    }
+  }, [presets]);
 
   // Transform invoices from DB format to UI format
   const uiInvoices = useMemo(() => {
@@ -56,6 +81,59 @@ export const InvoicingPage: React.FC = () => {
       default: return "bg-gray-100 text-gray-700";
     }
   };
+
+  // Get visible columns in order
+  const visibleColumns = useMemo(() => {
+    return invoiceColumnDefinitions
+      .filter(col => columnState.visibility[col.id] !== false)
+      .sort((a, b) => {
+        const aIndex = columnState.order.indexOf(a.id);
+        const bIndex = columnState.order.indexOf(b.id);
+        if (aIndex === -1 && bIndex === -1) return 0;
+        if (aIndex === -1) return 1;
+        if (bIndex === -1) return -1;
+        return aIndex - bIndex;
+      });
+  }, [columnState]);
+
+  // Column resizing handlers
+  const handleResizeStart = useCallback((columnId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setResizingColumn(columnId);
+    setResizeStartX(e.clientX);
+    setResizeStartWidth(columnState.widths[columnId] || invoiceColumnDefinitions.find(col => col.id === columnId)?.defaultWidth || 100);
+  }, [columnState.widths]);
+
+  const handleResizeMove = useCallback((e: MouseEvent) => {
+    if (!resizingColumn) return;
+
+    const diff = e.clientX - resizeStartX;
+    const newWidth = Math.max(50, resizeStartWidth + diff);
+
+    setColumnState(prev => ({
+      ...prev,
+      widths: {
+        ...prev.widths,
+        [resizingColumn]: newWidth,
+      },
+    }));
+  }, [resizingColumn, resizeStartX, resizeStartWidth]);
+
+  const handleResizeEnd = useCallback(() => {
+    setResizingColumn(null);
+  }, []);
+
+  useEffect(() => {
+    if (resizingColumn) {
+      document.addEventListener('mousemove', handleResizeMove);
+      document.addEventListener('mouseup', handleResizeEnd);
+      return () => {
+        document.removeEventListener('mousemove', handleResizeMove);
+        document.removeEventListener('mouseup', handleResizeEnd);
+      };
+    }
+  }, [resizingColumn, handleResizeMove, handleResizeEnd]);
 
   const filteredInvoices = useMemo(() => {
     if (!uiInvoices) return [];
@@ -213,6 +291,10 @@ export const InvoicingPage: React.FC = () => {
             className="pl-9"
           />
         </div>
+        <Button variant="outline" onClick={() => setColumnsDialogOpen(true)}>
+          <Columns className="h-4 w-4 mr-2" />
+          Columns
+        </Button>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -239,13 +321,24 @@ export const InvoicingPage: React.FC = () => {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-12"></TableHead>
-                      <TableHead>Invoice Number</TableHead>
-                      <TableHead>Person</TableHead>
-                      <TableHead>Amount</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Due Date</TableHead>
-                      <TableHead>Payment Method</TableHead>
+                      {visibleColumns.map((column) => {
+                        const width = columnState.widths[column.id] || column.defaultWidth;
+                        return (
+                          <TableHead 
+                            key={column.id} 
+                            className="relative"
+                            style={{ width: `${width}px`, minWidth: `${width}px` }}
+                          >
+                            {column.renderHeader()}
+                            <div
+                              ref={resizeRef}
+                              className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-blue-500 bg-transparent"
+                              onMouseDown={(e) => handleResizeStart(column.id, e)}
+                              style={{ zIndex: 10 }}
+                            />
+                          </TableHead>
+                        );
+                      })}
                       <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -253,87 +346,67 @@ export const InvoicingPage: React.FC = () => {
                     {filteredInvoices.map((invoice) => (
                       <React.Fragment key={invoice.id}>
                         <TableRow className="hover:bg-slate-50">
+                          {visibleColumns.map((column) => {
+                            const width = columnState.widths[column.id] || column.defaultWidth;
+                            const cell = column.renderCell(invoice, {
+                              isExpanded: expandedInvoices.has(invoice.id),
+                              onToggleExpand: () => toggleInvoiceExpansion(invoice.id),
+                            });
+                            
+                            // Apply width to the cell
+                            if (React.isValidElement(cell)) {
+                              return React.cloneElement(cell, {
+                                key: column.id,
+                                style: { 
+                                  ...(cell.props.style || {}),
+                                  width: `${width}px`, 
+                                  minWidth: `${width}px`,
+                                  maxWidth: `${width}px`,
+                                },
+                              });
+                            }
+                            return cell;
+                          })}
                           <TableCell>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 w-6 p-0"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleInvoiceExpansion(invoice.id);
-                              }}
-                            >
-                              {expandedInvoices.has(invoice.id) ? (
-                                <ChevronDown className="h-4 w-4" />
-                              ) : (
-                                <ChevronRight className="h-4 w-4" />
-                              )}
-                            </Button>
+                            <div className="flex gap-1">
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => handleEditInvoice(invoice)}
+                              >
+                                <Edit className="h-3 w-3" />
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => handleDeleteInvoice(invoice)}
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => {
+                                  const dbInvoice = invoicesData?.find((inv) => inv.id === invoice.id);
+                                  if (dbInvoice) setSelectedInvoice(dbInvoice);
+                                }}
+                              >
+                                <Eye className="h-3 w-3" />
+                              </Button>
+                              <Button variant="outline" size="sm">
+                                <Send className="h-3 w-3" />
+                              </Button>
+                              <Button variant="outline" size="sm">
+                                <Download className="h-3 w-3" />
+                              </Button>
+                            </div>
                           </TableCell>
-                          <TableCell className="font-medium">{invoice.invoiceNumber}</TableCell>
-                        <TableCell>
-                          <div>
-                            <div className="font-medium">{invoice.customer}</div>
-                            {invoice.orderId && (
-                              <div className="text-sm text-slate-500">Order: {invoice.orderId.substring(0, 8)}...</div>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="font-medium">{invoice.amount}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Badge className={getStatusColor(invoice.status)}>
-                              {invoice.status}
-                            </Badge>
-                            {invoice.status === "overdue" && (
-                              <span className="text-xs text-red-600">
-                                {invoice.daysOverdue} days
-                              </span>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>{invoice.dueDate}</TableCell>
-                        <TableCell>{invoice.paymentMethod || 'N/A'}</TableCell>
-                        <TableCell>
-                          <div className="flex gap-1">
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              onClick={() => handleEditInvoice(invoice)}
-                            >
-                              <Edit className="h-3 w-3" />
-                            </Button>
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              onClick={() => handleDeleteInvoice(invoice)}
-                              className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              onClick={() => {
-                                const dbInvoice = invoicesData?.find((inv) => inv.id === invoice.id);
-                                if (dbInvoice) setSelectedInvoice(dbInvoice);
-                              }}
-                            >
-                              <Eye className="h-3 w-3" />
-                            </Button>
-                            <Button variant="outline" size="sm">
-                              <Send className="h-3 w-3" />
-                            </Button>
-                            <Button variant="outline" size="sm">
-                              <Download className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                      {expandedInvoices.has(invoice.id) && (
-                        <ExpandedInvoiceOrders invoiceId={invoice.id} />
-                      )}
-                    </React.Fragment>
+                        </TableRow>
+                        {expandedInvoices.has(invoice.id) && (
+                          <ExpandedInvoiceOrders invoiceId={invoice.id} />
+                        )}
+                      </React.Fragment>
                     ))}
                   </TableBody>
                 </Table>
@@ -377,6 +450,16 @@ export const InvoicingPage: React.FC = () => {
       <InvoiceDetailSidebar
         invoice={selectedInvoice}
         onClose={() => setSelectedInvoice(null)}
+      />
+
+      {/* Columns Dialog */}
+      <ColumnsDialog
+        module="invoices"
+        open={columnsDialogOpen}
+        onOpenChange={setColumnsDialogOpen}
+        columnState={columnState}
+        onColumnStateChange={setColumnState}
+        availableColumns={getColumnDefinitions('invoices')}
       />
     </div>
   );

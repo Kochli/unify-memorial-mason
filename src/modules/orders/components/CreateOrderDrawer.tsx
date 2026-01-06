@@ -33,6 +33,10 @@ import { useToast } from '@/shared/hooks/use-toast';
 import { useMemorialsList } from '@/modules/memorials/hooks/useMemorials';
 import { transformMemorialsFromDb } from '@/modules/memorials/utils/memorialTransform';
 import type { UIMemorial } from '@/modules/memorials/utils/memorialTransform';
+import { useCustomersList } from '@/modules/customers/hooks/useCustomers';
+
+// Sentinel value for "no person selected" in Radix Select (cannot use empty string)
+const NO_PERSON_SENTINEL = '__none__';
 
 interface CreateOrderDrawerProps {
   open: boolean;
@@ -48,6 +52,7 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
   const { mutate: createOrder, isPending } = useCreateOrder();
   const { toast } = useToast();
   const { data: memorialsData } = useMemorialsList();
+  const { data: customers } = useCustomersList();
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [dimensions, setDimensions] = useState<string>('');
 
@@ -91,6 +96,7 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
   const form = useForm<OrderFormData>({
     resolver: zodResolver(orderFormSchema),
     defaultValues: {
+      person_id: null,
       customer_name: '',
       order_type: undefined,
       sku: '',
@@ -124,6 +130,10 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
     // Build notes with dimensions prefix
     const notesValue = buildNotes(dimensions, data.notes || '');
 
+    // Get person name if person_id is selected
+    const selectedCustomer = data.person_id ? customers?.find(c => c.id === data.person_id) : null;
+    const personName = selectedCustomer ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}` : null;
+
     // Build order payload - DO NOT include productId or dimensions (form-only fields)
     const orderData = {
       // Required fields
@@ -131,6 +141,10 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
       location: data.location.trim(),
       sku: data.sku.trim(),
       order_type: data.order_type,
+      
+      // Person assignment (optional)
+      person_id: data.person_id || null,
+      person_name: personName,
       
       // Snapshot fields (editable)
       material: data.material || null,
@@ -217,6 +231,51 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
                         <SelectContent>
                           <SelectItem value="New Memorial">New Memorial</SelectItem>
                           <SelectItem value="Renovation">Renovation</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              {/* Person Assignment */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold">Person Assignment</h3>
+                <FormField
+                  control={form.control}
+                  name="person_id"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Person (Optional)</FormLabel>
+                      <Select
+                        value={field.value || NO_PERSON_SENTINEL}
+                        onValueChange={(value) => {
+                          if (value === NO_PERSON_SENTINEL) {
+                            field.onChange(null);
+                            form.setValue('person_name', null);
+                          } else {
+                            field.onChange(value);
+                            // Set person_name snapshot
+                            const customer = customers?.find(c => c.id === value);
+                            if (customer) {
+                              form.setValue('person_name', `${customer.first_name} ${customer.last_name}`);
+                            }
+                          }
+                        }}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select person (optional)" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value={NO_PERSON_SENTINEL}>None</SelectItem>
+                          {customers?.map((customer) => (
+                            <SelectItem key={customer.id} value={customer.id}>
+                              {customer.first_name} {customer.last_name}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                       <FormMessage />

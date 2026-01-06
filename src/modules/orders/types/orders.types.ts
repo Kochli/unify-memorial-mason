@@ -2,6 +2,8 @@ export interface Order {
   id: string;
   invoice_id: string | null;
   job_id: string | null;
+  person_id: string | null;
+  person_name: string | null;
   customer_name: string;
   customer_email: string | null;
   customer_phone: string | null;
@@ -27,6 +29,11 @@ export interface Order {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  customers?: {
+    id: string;
+    first_name: string;
+    last_name: string;
+  } | null;
 }
 
 export type OrderInsert = Omit<Order, 'id' | 'created_at' | 'updated_at'>;

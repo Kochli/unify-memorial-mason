@@ -147,6 +147,11 @@ export const CreateInvoiceDrawer: React.FC<CreateInvoiceDrawerProps> = ({
       const createdInvoice = await createInvoiceAsync(invoiceData);
       
       // Create all Orders with invoice_id
+      // If invoice has customer_name, try to match it to a customer to get person_id
+      const invoicePerson = data.customer_name && data.customer_name.trim() 
+        ? customers?.find(c => `${c.first_name} ${c.last_name}` === data.customer_name.trim())
+        : null;
+
       const orderPromises = orders.map(async (order) => {
         const notesValue = buildNotes(dimensions[order.id] || '', order.data.notes || '');
         
@@ -161,6 +166,9 @@ export const CreateInvoiceDrawer: React.FC<CreateInvoiceDrawerProps> = ({
           notes: notesValue,
           latitude: order.data.latitude ?? null,
           longitude: order.data.longitude ?? null,
+          // Person assignment: inherit from invoice if available
+          person_id: invoicePerson?.id || null,
+          person_name: invoicePerson ? `${invoicePerson.first_name} ${invoicePerson.last_name}` : null,
           customer_email: null,
           customer_phone: null,
           stone_status: 'NA' as const,

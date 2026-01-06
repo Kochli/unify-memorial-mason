@@ -12,8 +12,11 @@ export const jobFormSchema = z.object({
   priority: z.enum(['low', 'medium', 'high']).default('medium'),
   notes: z.string().trim().optional().or(z.literal('')),
   // UI-only fields (not saved to database)
-  order_ids: z.array(z.string().uuid()).min(1, 'At least one order is required'),
+  // order_ids is optional to support EditJobDrawer (jobs may have no orders)
+  // CreateJobDrawer should validate this separately
+  order_ids: z.array(z.string().uuid()).optional().default([]),
   assigned_people_ids: z.array(z.string().uuid()).optional(),
+  worker_ids: z.array(z.string().uuid()).optional(),
 });
 
 export type JobFormData = z.infer<typeof jobFormSchema>;

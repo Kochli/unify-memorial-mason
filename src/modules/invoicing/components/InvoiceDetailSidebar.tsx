@@ -5,6 +5,7 @@ import { Badge } from "@/shared/components/ui/badge";
 import { X, DollarSign, Calendar, FileText, Plus } from 'lucide-react';
 import { useOrdersByInvoice } from '@/modules/orders/hooks/useOrders';
 import { CreateOrderDrawer } from '@/modules/orders/components/CreateOrderDrawer';
+import { CustomerDetailsPopover } from '@/shared/components/customer/CustomerDetailsPopover';
 import type { Invoice } from '../types/invoicing.types';
 
 interface InvoiceDetailSidebarProps {
@@ -68,7 +69,21 @@ export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({ invo
             </div>
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Customer</span>
-              <span className="font-medium">{invoice.customer_name}</span>
+              {invoice.customer_name && invoice.customer_name.trim() ? (
+                <CustomerDetailsPopover
+                  invoiceId={invoice.id}
+                  fallbackName={invoice.customer_name}
+                  fallbackPhone={null}
+                  fallbackEmail={null}
+                  trigger={
+                    <button className="text-left hover:underline font-medium">
+                      {invoice.customer_name}
+                    </button>
+                  }
+                />
+              ) : (
+                <span className="font-medium text-muted-foreground">—</span>
+              )}
             </div>
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Amount</span>
