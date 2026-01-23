@@ -1,4 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
@@ -6,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/components/ui/tabs";
 import { Input } from "@/shared/components/ui/input";
 import { Search, Plus, Download, Eye, AlertCircle, DollarSign, TrendingUp, Edit, Trash2, ChevronRight, ChevronDown, Columns } from 'lucide-react';
-import { useInvoicesList } from '../hooks/useInvoices';
+import { useInvoicesList, invoicesKeys } from '../hooks/useInvoices';
 import { transformInvoicesForUI, type UIInvoice } from '../utils/invoiceTransform';
 import { CreateInvoiceDrawer } from '../components/CreateInvoiceDrawer';
 import { EditInvoiceDrawer } from '../components/EditInvoiceDrawer';
@@ -21,6 +23,8 @@ import { applyPresetToState, getDefaultState } from '@/shared/tableViewPresets/u
 import { getColumnDefinitions } from '@/shared/tableViewPresets/config/defaultColumns';
 import type { ColumnState } from '@/shared/tableViewPresets/types/tableViewPresets.types';
 import { invoiceColumnDefinitions } from '../components/invoiceColumnDefinitions';
+import { useToast } from '@/shared/hooks/use-toast';
+import { fetchInvoice } from '../api/invoicing.api';
 
 export const InvoicingPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState("all");
@@ -39,8 +43,44 @@ export const InvoicingPage: React.FC = () => {
   const [resizeStartWidth, setResizeStartWidth] = useState(0);
   const resizeRef = useRef<HTMLDivElement>(null);
 
+  const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
   const { data: invoicesData, isLoading, error } = useInvoicesList();
   const { data: presets } = usePresetsByModule('invoices');
+
+  // Post-payment redirect: ?stripe=success&invoice_id=... → invalidate, open sidebar, toast
+  useEffect(() => {
+    const stripe = searchParams.get('stripe');
+    const invoiceId = searchParams.get('invoice_id');
+    if (stripe !== 'success' || !invoiceId) return;
+
+    (async () => {
+      await queryClient.invalidateQueries({ queryKey: invoicesKeys.all });
+      await queryClient.invalidateQueries({ queryKey: invoicesKeys.detail(invoiceId) });
+      try {
+        const inv = await fetchInvoice(invoiceId);
+        setSelectedInvoice(inv);
+        toast({
+          title: 'Payment successful',
+          description: 'The invoice has been marked as paid.',
+        });
+      } catch {
+        toast({
+          variant: 'destructive',
+          title: 'Payment recorded',
+          description: 'Could not load invoice details. The list will refresh.',
+        });
+      }
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('stripe');
+        next.delete('invoice_id');
+        next.delete('session_id');
+        return next;
+      });
+    })();
+  }, [searchParams, queryClient, setSearchParams, toast]);
 
   // Load default preset on mount
   useEffect(() => {

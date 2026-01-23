@@ -5,8 +5,9 @@ import { Badge } from "@/shared/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/components/ui/tabs";
 import { Input } from "@/shared/components/ui/input";
 import { Mail, Phone, MessageSquare, Search, Archive, Eye } from 'lucide-react';
+import { useToast } from '@/shared/hooks/use-toast';
 import { ConversationView } from "../components/ConversationView";
-import { useConversationsList, useMarkAsRead, useArchiveConversations } from "@/modules/inbox/hooks/useInboxConversations";
+import { useConversationsList, useMarkAsRead, useArchiveConversations, useSyncGmail } from "@/modules/inbox/hooks/useInboxConversations";
 import { formatConversationTimestamp } from "@/modules/inbox/utils/conversationUtils";
 import type { ConversationFilters } from "@/modules/inbox/types/inbox.types";
 
@@ -38,6 +39,27 @@ export const UnifiedInboxPage: React.FC = () => {
   const { data: conversations, isLoading, isError } = useConversationsList(filters);
   const markAsReadMutation = useMarkAsRead();
   const archiveMutation = useArchiveConversations();
+  const syncGmailMutation = useSyncGmail();
+  const { toast } = useToast();
+
+  const handleSyncEmail = () => {
+    syncGmailMutation.mutate(undefined, {
+      onSuccess: (data) => {
+        toast({
+          title: 'Email sync completed',
+          description: `Synced ${data.syncedCount} messages, skipped ${data.skippedCount}, ${data.errorsCount} errors`,
+        });
+      },
+      onError: (error) => {
+        const message = error instanceof Error ? error.message : 'Failed to sync email';
+        toast({
+          title: 'Email sync failed',
+          description: message,
+          variant: 'destructive',
+        });
+      },
+    });
+  };
 
   const getIcon = (channel: string) => {
     switch (channel) {
@@ -78,6 +100,14 @@ export const UnifiedInboxPage: React.FC = () => {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={handleSyncEmail}
+            disabled={syncGmailMutation.isPending}
+          >
+            {syncGmailMutation.isPending ? 'Syncing…' : 'Sync Email'}
+          </Button>
           <Button 
             variant="outline" 
             size="sm"

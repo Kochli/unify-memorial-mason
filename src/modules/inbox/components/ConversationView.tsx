@@ -27,11 +27,15 @@ export const ConversationView: React.FC<ConversationViewProps> = ({ conversation
   }, [messages]);
 
   const handleSendReply = () => {
-    if (!conversationId || !replyText.trim()) return;
+    if (!conversationId || !replyText.trim() || !conversation) return;
 
     setErrorMessage(null);
     sendReplyMutation.mutate(
-      { conversationId, bodyText: replyText },
+      { 
+        conversationId, 
+        bodyText: replyText,
+        channel: conversation.channel as 'email' | 'sms' | 'whatsapp',
+      },
       {
         onSuccess: () => {
           setReplyText(''); // Clear textarea

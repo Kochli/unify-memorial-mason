@@ -14,6 +14,7 @@ export interface UIInvoice {
   paymentDate: string | null;
   notes: string | null;
   daysOverdue: number; // Calculated field
+  stripeStatus?: 'unpaid' | 'pending' | 'paid' | null;
 }
 
 /**
@@ -44,6 +45,7 @@ export function transformInvoiceForUI(invoice: Invoice): UIInvoice {
     paymentDate: invoice.payment_date,
     notes: invoice.notes,
     daysOverdue,
+    stripeStatus: invoice.stripe_status ?? 'unpaid',
   };
 }
 

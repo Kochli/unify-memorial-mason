@@ -2,23 +2,60 @@ import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
-import { X, DollarSign, Calendar, FileText, Plus } from 'lucide-react';
+import { X, Calendar, Plus, Copy } from 'lucide-react';
 import { useOrdersByInvoice } from '@/modules/orders/hooks/useOrders';
 import { CreateOrderDrawer } from '@/modules/orders/components/CreateOrderDrawer';
 import { CustomerDetailsPopover } from '@/shared/components/customer/CustomerDetailsPopover';
+import { useToast } from '@/shared/hooks/use-toast';
 import type { Invoice } from '../types/invoicing.types';
 import { getOrderTotalFormatted } from '@/modules/orders/utils/orderCalculations';
+import { createCheckoutSession } from '../api/stripe.api';
 
 interface InvoiceDetailSidebarProps {
   invoice: Invoice | null;
   onClose: () => void;
 }
 
+function getStripePillClass(stripeStatus: string | null | undefined): string {
+  switch (stripeStatus) {
+    case 'paid': return 'bg-green-100 text-green-700';
+    case 'pending': return 'bg-amber-100 text-amber-700';
+    case 'unpaid':
+    default: return 'bg-slate-100 text-slate-600';
+  }
+}
+
 export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({ invoice, onClose }) => {
   const [createOrderDrawerOpen, setCreateOrderDrawerOpen] = useState(false);
+  const [copyLoading, setCopyLoading] = useState(false);
+  const { toast } = useToast();
   const { data: orders, isLoading: isOrdersLoading } = useOrdersByInvoice(invoice?.id ?? null);
 
   if (!invoice) return null;
+
+  const isPaid = invoice.status === 'paid' || invoice.stripe_status === 'paid';
+  const stripeStatus = invoice.stripe_status ?? 'unpaid';
+
+  const handleCopyPaymentLink = async () => {
+    if (isPaid) return;
+    setCopyLoading(true);
+    try {
+      const { url } = await createCheckoutSession(invoice.id);
+      await navigator.clipboard.writeText(url);
+      toast({
+        title: 'Payment link copied',
+        description: 'Share the link with the customer to collect payment.',
+      });
+    } catch (e) {
+      toast({
+        variant: 'destructive',
+        title: 'Could not create payment link',
+        description: e instanceof Error ? e.message : 'Something went wrong.',
+      });
+    } finally {
+      setCopyLoading(false);
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -64,10 +101,30 @@ export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({ invo
           <CardContent className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Status</span>
-              <Badge className={getStatusColor(invoice.status)}>
-                {invoice.status}
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Badge className={getStatusColor(invoice.status)}>
+                  {invoice.status}
+                </Badge>
+                <Badge variant="outline" className={getStripePillClass(stripeStatus)}>
+                  Stripe: {stripeStatus}
+                </Badge>
+              </div>
             </div>
+            {!isPaid && (
+              <div className="pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  disabled={copyLoading}
+                  onClick={handleCopyPaymentLink}
+                >
+                  <Copy className="h-4 w-4 mr-2" />
+                  {copyLoading ? 'Creating…' : 'Copy payment link'}
+                </Button>
+              </div>
+            )}
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Customer</span>
               {invoice.customer_name && invoice.customer_name.trim() ? (

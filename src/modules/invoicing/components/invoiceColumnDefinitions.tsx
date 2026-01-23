@@ -29,6 +29,15 @@ const getStatusColor = (status: string) => {
   }
 };
 
+const getStripePillClass = (stripeStatus: string | null | undefined): string => {
+  switch (stripeStatus) {
+    case 'paid': return 'bg-green-100 text-green-700';
+    case 'pending': return 'bg-amber-100 text-amber-700';
+    case 'unpaid':
+    default: return 'bg-slate-100 text-slate-600';
+  }
+};
+
 export const invoiceColumnDefinitions: InvoiceColumnDefinition[] = [
   {
     id: 'expand',
@@ -115,9 +124,12 @@ export const invoiceColumnDefinitions: InvoiceColumnDefinition[] = [
     renderHeader: () => <div>Status</div>,
     renderCell: (invoice) => (
       <TableCell>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge className={getStatusColor(invoice.status)}>
             {invoice.status}
+          </Badge>
+          <Badge variant="outline" className={getStripePillClass(invoice.stripeStatus)}>
+            {invoice.stripeStatus ?? 'unpaid'}
           </Badge>
           {invoice.status === "overdue" && (
             <span className="text-xs text-red-600">

@@ -6,6 +6,7 @@ import {
   markConversationsAsRead,
   archiveConversations,
 } from '../api/inboxConversations.api';
+import { syncGmail } from '../api/inboxGmail.api';
 import type { ConversationFilters } from '../types/inbox.types';
 
 export const inboxKeys = {
@@ -56,6 +57,18 @@ export function useArchiveConversations() {
     mutationFn: (ids: string[]) => archiveConversations(ids),
     onSuccess: () => {
       // Invalidate all conversation list queries
+      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+    },
+  });
+}
+
+export function useSyncGmail() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (options?: { since?: string; maxMessages?: number }) => syncGmail(options),
+    onSuccess: () => {
+      // Invalidate all conversation list queries to show new emails
       queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
     },
   });

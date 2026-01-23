@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchMessagesByConversation } from '../api/inboxMessages.api';
 import { inboxKeys } from './useInboxConversations';
 import { sendTwilioMessage } from '../api/inboxTwilio.api';
+import { sendGmailReply } from '../api/inboxGmail.api';
 
 export function useMessagesByConversation(conversationId: string | null) {
   return useQuery({
@@ -15,18 +16,34 @@ export function useSendReply() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ conversationId, bodyText }: { conversationId: string; bodyText: string }) => {
+    mutationFn: async ({ 
+      conversationId, 
+      bodyText, 
+      channel 
+    }: { 
+      conversationId: string; 
+      bodyText: string;
+      channel: 'email' | 'sms' | 'whatsapp';
+    }) => {
       // Validate body text (trim, reject empty)
       const trimmedBodyText = bodyText.trim();
       if (!trimmedBodyText) {
         throw new Error('Message body cannot be empty');
       }
 
-      // Call Edge Function to send via Twilio and update DB
-      return await sendTwilioMessage({
-        conversation_id: conversationId,
-        body_text: trimmedBodyText,
-      });
+      // Route to appropriate service based on channel
+      if (channel === 'email') {
+        return await sendGmailReply({
+          conversationId,
+          bodyText: trimmedBodyText,
+        });
+      } else {
+        // SMS or WhatsApp via Twilio
+        return await sendTwilioMessage({
+          conversation_id: conversationId,
+          body_text: trimmedBodyText,
+        });
+      }
     },
     onSuccess: (data, variables) => {
       // Invalidate message thread
