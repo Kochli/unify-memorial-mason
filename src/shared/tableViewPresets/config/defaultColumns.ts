@@ -31,6 +31,7 @@ export const invoicesColumns: ColumnDefinition[] = [
   { id: 'customer', label: 'Person', defaultWidth: 180 },
   { id: 'amount', label: 'Amount', defaultWidth: 120 },
   { id: 'status', label: 'Status', defaultWidth: 100 },
+  { id: 'stripePaymentLink', label: 'Stripe payment link', defaultWidth: 140 },
   { id: 'dueDate', label: 'Due Date', defaultWidth: 120 },
   { id: 'paymentMethod', label: 'Payment Method', defaultWidth: 150 },
   { id: 'actions', label: 'Actions', defaultWidth: 120 },
@@ -58,7 +59,7 @@ export function getDefaultColumnVisibility(module: 'orders' | 'invoices'): Recor
   const columns = getColumnDefinitions(module);
   const visibility: Record<string, boolean> = {};
   columns.forEach(col => {
-    visibility[col.id] = true;
+    visibility[col.id] = col.id === 'stripePaymentLink' ? false : true;
   });
   return visibility;
 }

@@ -32,6 +32,9 @@ export interface InboxConversation {
   last_message_preview: string | null;
   created_at: string;
   updated_at: string;
+  person_id?: string | null;
+  link_state?: 'linked' | 'unlinked' | 'ambiguous';
+  link_meta?: { candidates?: string[]; matched_on?: 'email' | 'phone' };
 }
 
 export interface InboxMessage {
@@ -68,7 +71,9 @@ export type InboxChannelAccountInsert = Omit<InboxChannelAccount, 'id' | 'create
 // Filter types
 export interface ConversationFilters {
   status?: 'open' | 'archived' | 'closed';
-  channel?: 'email' | 'sms' | 'whatsapp' | 'phone'; // 'phone' maps to sms/whatsapp
+  channel?: 'email' | 'sms' | 'whatsapp';
   unread_only?: boolean;
   search?: string;
+  person_id?: string | null;
+  unlinked_only?: boolean;
 }

@@ -237,8 +237,6 @@ export const CreateInvoiceDrawer: React.FC<CreateInvoiceDrawerProps> = ({
             ? toMoneyNumber(order.data.renovation_service_cost) // Blank => 0 for Renovation
             : 0, // Must be 0 for New Memorial orders (NOT NULL constraint, cannot send null)
           notes: notesValue,
-          latitude: order.data.latitude ?? null,
-          longitude: order.data.longitude ?? null,
           // Person assignment: inherit from invoice if available
           person_id: invoicePerson?.id || null,
           person_name: invoicePerson ? `${invoicePerson.first_name} ${invoicePerson.last_name}` : null,

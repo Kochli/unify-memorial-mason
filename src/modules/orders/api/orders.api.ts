@@ -1,5 +1,5 @@
 import { supabase } from '@/shared/lib/supabase';
-import type { Order, OrderInsert, OrderUpdate, OrderAdditionalOption } from '../types/orders.types';
+import type { Order, OrderInsert, OrderUpdate, OrderAdditionalOption, OrderPerson } from '../types/orders.types';
 import { normalizeOrder } from '../utils/numberParsing';
 
 export async function fetchOrders() {
@@ -33,6 +33,98 @@ export async function fetchOrder(id: string) {
     return normalizedOrder;
   }
   throw new Error('Order not found');
+}
+
+/**
+ * Fetch order_people for an order (people linked to order, with one primary)
+ * @param orderId - UUID of the order
+ * @returns Array of OrderPerson objects (primary first)
+ */
+export async function fetchOrderPeople(orderId: string): Promise<OrderPerson[]> {
+  const { data, error } = await supabase
+    .from('order_people')
+    .select('id, order_id, person_id, is_primary, created_at, customers(id, first_name, last_name, email, phone)')
+    .eq('order_id', orderId)
+    .order('is_primary', { ascending: false });
+
+  if (error) throw error;
+  return (data || []) as OrderPerson[];
+}
+
+/**
+ * Upsert order_people for an order; mirror primary to orders.person_id and orders.person_name
+ * @param orderId - UUID of the order
+ * @param people - Array of { person_id, is_primary }; exactly one must be primary (first used if none)
+ */
+export async function upsertOrderPeople(
+  orderId: string,
+  people: { person_id: string; is_primary: boolean }[]
+): Promise<void> {
+  if (people.length === 0) {
+    const { error: delErr } = await supabase.from('order_people').delete().eq('order_id', orderId);
+    if (delErr) throw delErr;
+    const { error: updErr } = await supabase
+      .from('orders')
+      .update({ person_id: null, person_name: null })
+      .eq('id', orderId);
+    if (updErr) throw updErr;
+    return;
+  }
+
+  // Enforce exactly one primary
+  const hasPrimary = people.some((p) => p.is_primary);
+  const normalized = hasPrimary
+    ? people
+    : people.map((p, i) => ({ ...p, is_primary: i === 0 }));
+
+  // Delete existing, insert new (simpler than diff/upsert)
+  const { error: delErr } = await supabase.from('order_people').delete().eq('order_id', orderId);
+  if (delErr) throw delErr;
+
+  const rows = normalized.map((p) => ({
+    order_id: orderId,
+    person_id: p.person_id,
+    is_primary: p.is_primary,
+  }));
+
+  const { error: insErr } = await supabase.from('order_people').insert(rows);
+  if (insErr) throw insErr;
+
+  // Mirror primary to orders
+  const primary = normalized.find((p) => p.is_primary);
+  if (primary) {
+    const { data: customer } = await supabase
+      .from('customers')
+      .select('id, first_name, last_name')
+      .eq('id', primary.person_id)
+      .single();
+
+    const personName = customer
+      ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() || null
+      : null;
+
+    const { error: updErr } = await supabase
+      .from('orders')
+      .update({ person_id: primary.person_id, person_name: personName })
+      .eq('id', orderId);
+    if (updErr) throw updErr;
+  }
+}
+
+/**
+ * Fetch all orders for a person (customer)
+ * @param personId - UUID of the customer (person)
+ * @returns Array of Order objects ordered by creation date (newest first)
+ */
+export async function fetchOrdersByPersonId(personId: string) {
+  const { data, error } = await supabase
+    .from('orders_with_options_total')
+    .select('*, customers(id, first_name, last_name)')
+    .eq('person_id', personId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return (data || []).map(normalizeOrder);
 }
 
 /**

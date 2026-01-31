@@ -1,3 +1,18 @@
+export interface OrderPerson {
+  id: string;
+  order_id: string;
+  person_id: string;
+  is_primary: boolean;
+  created_at: string;
+  customers?: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    email?: string | null;
+    phone?: string | null;
+  } | null;
+}
+
 export interface OrderAdditionalOption {
   id: string;
   order_id: string;
@@ -55,6 +70,8 @@ export interface Order {
     first_name: string;
     last_name: string;
   } | null;
+  people?: OrderPerson[];
+  primary_person_id?: string | null;
 }
 
 export type OrderInsert = Omit<Order, 'id' | 'created_at' | 'updated_at'>;

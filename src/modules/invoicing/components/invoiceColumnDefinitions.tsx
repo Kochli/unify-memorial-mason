@@ -1,10 +1,60 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { TableCell } from '@/shared/components/ui/table';
 import { Button } from '@/shared/components/ui/button';
 import { Badge } from '@/shared/components/ui/badge';
-import { ChevronRight, ChevronDown } from 'lucide-react';
+import { ChevronRight, ChevronDown, Loader2 } from 'lucide-react';
 import { CustomerDetailsPopover } from '@/shared/components/customer/CustomerDetailsPopover';
+import { useToast } from '@/shared/hooks/use-toast';
+import { createCheckoutSession } from '../api/stripe.api';
 import type { UIInvoice } from '../utils/invoiceTransform';
+
+function StripePaymentLinkCell({ invoice }: { invoice: UIInvoice }) {
+  const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
+  const isPaid = invoice.status === 'paid' || invoice.stripeStatus === 'paid';
+
+  const handleOpen = async () => {
+    if (isPaid) return;
+    setLoading(true);
+    try {
+      const { url } = await createCheckoutSession(invoice.id);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (e) {
+      toast({
+        variant: 'destructive',
+        title: 'Could not create payment link',
+        description: e instanceof Error ? e.message : 'Something went wrong.',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (isPaid) {
+    return <span className="text-sm text-muted-foreground">—</span>;
+  }
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="h-7"
+      disabled={loading}
+      onClick={(e) => {
+        e.stopPropagation();
+        handleOpen();
+      }}
+    >
+      {loading ? (
+        <>
+          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+          Opening…
+        </>
+      ) : (
+        'Open'
+      )}
+    </Button>
+  );
+}
 
 export interface InvoiceColumnDefinition {
   id: string;
@@ -137,6 +187,18 @@ export const invoiceColumnDefinitions: InvoiceColumnDefinition[] = [
             </span>
           )}
         </div>
+      </TableCell>
+    ),
+  },
+  {
+    id: 'stripePaymentLink',
+    label: 'Stripe payment link',
+    defaultWidth: 140,
+    sortable: false,
+    renderHeader: () => <div>Stripe payment link</div>,
+    renderCell: (invoice) => (
+      <TableCell>
+        <StripePaymentLinkCell invoice={invoice} />
       </TableCell>
     ),
   },

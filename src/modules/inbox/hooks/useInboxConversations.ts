@@ -5,6 +5,8 @@ import {
   updateConversation,
   markConversationsAsRead,
   archiveConversations,
+  linkConversation,
+  unlinkConversation,
 } from '../api/inboxConversations.api';
 import { syncGmail } from '../api/inboxGmail.api';
 import type { ConversationFilters } from '../types/inbox.types';
@@ -70,6 +72,31 @@ export function useSyncGmail() {
     onSuccess: () => {
       // Invalidate all conversation list queries to show new emails
       queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+    },
+  });
+}
+
+export function useLinkConversation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ conversationId, personId }: { conversationId: string; personId: string }) =>
+      linkConversation(conversationId, personId),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.detail(variables.conversationId) });
+    },
+  });
+}
+
+export function useUnlinkConversation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (conversationId: string) => unlinkConversation(conversationId),
+    onSuccess: (_, conversationId) => {
+      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.detail(conversationId) });
     },
   });
 }

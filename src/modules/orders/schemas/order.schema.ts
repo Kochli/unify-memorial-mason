@@ -7,8 +7,16 @@ export const additionalOptionSchema = z.object({
   description: z.string().optional().nullable(),
 });
 
+export const orderPeopleSchema = z.object({
+  person_id: z.string().uuid(),
+  is_primary: z.boolean(),
+});
+
 export const orderFormSchema = z.object({
-  person_id: z.string().uuid().optional().nullable(),
+    order_people: z
+      .array(orderPeopleSchema)
+      .default([])
+      .refine((arr) => arr.length === 0 || arr.filter((p) => p.is_primary).length === 1, 'Exactly one person must be primary'),
   customer_name: z.string().min(1, 'Deceased name is required'),
   customer_email: z.string().email('Invalid email').optional().or(z.literal('')),
   customer_phone: z.string().optional().or(z.literal('')),
@@ -51,6 +59,8 @@ export const orderFormSchema = z.object({
   dimensions: z.string().optional(),
   productPhotoUrl: z.string().url('Product photo URL must be a valid URL').optional().nullable().or(z.literal('')), // Snapshot of product photo URL, populated automatically from product selection
   additional_options: z.array(additionalOptionSchema).optional().default([]),
+  // Legacy: kept for backward compat in payloads; derived from order_people primary
+  person_id: z.string().uuid().optional().nullable(),
 });
 
 export type OrderFormData = z.infer<typeof orderFormSchema>;

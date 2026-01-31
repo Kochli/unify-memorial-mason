@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
@@ -7,7 +7,9 @@ import { Input } from "@/shared/components/ui/input";
 import { Mail, Phone, MessageSquare, Search, Archive, Eye } from 'lucide-react';
 import { useToast } from '@/shared/hooks/use-toast';
 import { ConversationView } from "../components/ConversationView";
-import { useConversationsList, useMarkAsRead, useArchiveConversations, useSyncGmail } from "@/modules/inbox/hooks/useInboxConversations";
+import { PeopleSidebar } from "../components/PeopleSidebar";
+import { PersonOrdersPanel } from "../components/PersonOrdersPanel";
+import { useConversationsList, useConversation, useMarkAsRead, useArchiveConversations, useSyncGmail } from "@/modules/inbox/hooks/useInboxConversations";
 import { formatConversationTimestamp } from "@/modules/inbox/utils/conversationUtils";
 import type { ConversationFilters } from "@/modules/inbox/types/inbox.types";
 
@@ -16,6 +18,15 @@ export const UnifiedInboxPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+
+  const { data: selectedConversation } = useConversation(selectedConversationId);
+  const activePersonId = (selectedConversation?.person_id ?? selectedPersonId ?? null) as string | null;
+
+  useEffect(() => {
+    setSelectedOrderId(null);
+  }, [activePersonId]);
 
   // Map tab to filters
   const filters = React.useMemo<ConversationFilters>(() => {
@@ -25,16 +36,24 @@ export const UnifiedInboxPage: React.FC = () => {
       base.unread_only = true;
     } else if (activeTab === 'email') {
       base.channel = 'email';
-    } else if (activeTab === 'phone') {
-      base.channel = 'phone'; // Maps to sms/whatsapp in API
+    } else if (activeTab === 'sms') {
+      base.channel = 'sms';
+    } else if (activeTab === 'whatsapp') {
+      base.channel = 'whatsapp';
     }
     
     if (searchQuery.trim()) {
       base.search = searchQuery;
     }
+
+    if (selectedPersonId != null) {
+      base.person_id = selectedPersonId;
+    } else {
+      base.unlinked_only = true;
+    }
     
     return base;
-  }, [activeTab, searchQuery]);
+  }, [activeTab, searchQuery, selectedPersonId]);
 
   const { data: conversations, isLoading, isError } = useConversationsList(filters);
   const markAsReadMutation = useMarkAsRead();
@@ -139,17 +158,25 @@ export const UnifiedInboxPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="flex gap-0 min-h-[480px]">
+        {/* People Sidebar */}
+        <PeopleSidebar
+          selectedPersonId={selectedPersonId}
+          onSelectPerson={setSelectedPersonId}
+        />
+        {/* Conversations List + Conversation View */}
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-6 min-w-0">
         {/* Conversations List */}
         <div>
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="all" className="relative">
                 All
               </TabsTrigger>
               <TabsTrigger value="unread">Unread</TabsTrigger>
               <TabsTrigger value="email">Email</TabsTrigger>
-              <TabsTrigger value="phone">Phone</TabsTrigger>
+              <TabsTrigger value="sms">SMS</TabsTrigger>
+              <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
             </TabsList>
 
             <TabsContent value={activeTab} className="space-y-4">
@@ -222,9 +249,18 @@ export const UnifiedInboxPage: React.FC = () => {
           </Tabs>
         </div>
 
-        {/* Conversation View */}
-        <div>
-          <ConversationView conversationId={selectedConversationId} />
+        {/* Conversation View + Person Orders Panel */}
+        <div className="flex flex-col gap-4">
+          <div className="min-h-[200px]">
+            <ConversationView conversationId={selectedConversationId} />
+          </div>
+          <PersonOrdersPanel
+            personId={activePersonId}
+            selectedOrderId={selectedOrderId}
+            onSelectOrder={setSelectedOrderId}
+            onCloseOrder={() => setSelectedOrderId(null)}
+          />
+        </div>
         </div>
       </div>
     </div>

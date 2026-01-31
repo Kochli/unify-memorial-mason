@@ -15,16 +15,17 @@ export async function fetchConversations(filters?: ConversationFilters) {
   }
 
   if (filters?.channel) {
-    if (filters.channel === 'phone') {
-      // Map 'phone' to both sms and whatsapp
-      query = query.in('channel', ['sms', 'whatsapp']);
-    } else {
-      query = query.eq('channel', filters.channel);
-    }
+    query = query.eq('channel', filters.channel);
   }
 
   if (filters?.unread_only) {
     query = query.gt('unread_count', 0);
+  }
+
+  if (filters?.person_id != null && filters.person_id !== '') {
+    query = query.eq('person_id', filters.person_id);
+  } else if (filters?.unlinked_only) {
+    query = query.is('person_id', null);
   }
 
   // Search: ILIKE over primary_handle, subject, last_message_preview
@@ -91,4 +92,36 @@ export async function archiveConversations(ids: string[]) {
 
   if (error) throw error;
   return (data || []) as InboxConversation[];
+}
+
+export async function linkConversation(conversationId: string, personId: string): Promise<InboxConversation> {
+  const { data, error } = await supabase
+    .from('inbox_conversations')
+    .update({
+      person_id: personId,
+      link_state: 'linked',
+      link_meta: {},
+    })
+    .eq('id', conversationId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data as InboxConversation;
+}
+
+export async function unlinkConversation(conversationId: string): Promise<InboxConversation> {
+  const { data, error } = await supabase
+    .from('inbox_conversations')
+    .update({
+      person_id: null,
+      link_state: 'unlinked',
+      link_meta: {},
+    })
+    .eq('id', conversationId)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data as InboxConversation;
 }

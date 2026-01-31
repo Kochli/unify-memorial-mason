@@ -53,8 +53,6 @@ export const OrderFormInline: React.FC<OrderFormInlineProps> = ({
       order_type: order.data.order_type || 'New Memorial', // Default to 'New Memorial' if undefined
       sku: order.data.sku || '',
       location: order.data.location || '',
-      latitude: order.data.latitude ?? null,
-      longitude: order.data.longitude ?? null,
       material: order.data.material || '',
       color: order.data.color || '',
       value: order.data.value ?? null,
@@ -236,48 +234,6 @@ export const OrderFormInline: React.FC<OrderFormInlineProps> = ({
                 <FormLabel>Grave Number *</FormLabel>
                 <FormControl>
                   <Input placeholder="e.g., Plot 123" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-
-        {/* Coordinates */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <FormField
-            control={form.control}
-            name="latitude"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Latitude</FormLabel>
-                <FormControl>
-                  <Input
-                    type="number"
-                    step="0.00000001"
-                    placeholder="e.g., 51.5074"
-                    value={field.value ?? ''}
-                    onChange={(e) => field.onChange(e.target.value ? parseFloat(e.target.value) : null)}
-                  />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="longitude"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Longitude</FormLabel>
-                <FormControl>
-                  <Input
-                    type="number"
-                    step="0.00000001"
-                    placeholder="e.g., -0.1278"
-                    value={field.value ?? ''}
-                    onChange={(e) => field.onChange(e.target.value ? parseFloat(e.target.value) : null)}
-                  />
                 </FormControl>
                 <FormMessage />
               </FormItem>

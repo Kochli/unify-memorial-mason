@@ -21,10 +21,11 @@ export function normalizeConfig(
   const availableColumns = getColumnDefinitions(module);
   const availableColumnIds = new Set(availableColumns.map(col => col.id));
   
-  // Normalize visibility: add missing columns (default to true), remove deleted columns
+  // Normalize visibility: add missing columns (use module default), remove deleted columns
+  const defaultVisibility = getDefaultColumnVisibility(module);
   const normalizedVisibility: Record<string, boolean> = {};
   availableColumns.forEach(col => {
-    normalizedVisibility[col.id] = config.columns.visibility[col.id] ?? true;
+    normalizedVisibility[col.id] = config.columns.visibility[col.id] ?? defaultVisibility[col.id] ?? true;
   });
   
   // Normalize order: filter out deleted columns, add missing columns at end

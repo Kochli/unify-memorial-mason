@@ -3,6 +3,9 @@ import {
   fetchOrders, 
   fetchOrder, 
   fetchOrdersByInvoice, 
+  fetchOrdersByPersonId,
+  fetchOrderPeople,
+  upsertOrderPeople,
   createOrder, 
   updateOrder, 
   deleteOrder, 
@@ -20,9 +23,11 @@ export const ordersKeys = {
   all: ['orders'] as const,
   detail: (id: string) => ['orders', id] as const,
   byInvoice: (invoiceId: string) => ['orders', 'byInvoice', invoiceId] as const,
+  byPerson: (personId: string) => ['orders', 'byPerson', personId] as const,
   personId: (orderId: string) => ['orders', 'personId', orderId] as const,
   personIdsByInvoice: (invoiceId: string) => ['orders', 'personIdsByInvoice', invoiceId] as const,
   additionalOptions: (orderId: string) => ['orders', 'additionalOptions', orderId] as const,
+  orderPeople: (orderId: string) => ['orders', 'orderPeople', orderId] as const,
 };
 
 export function useOrdersList() {
@@ -50,6 +55,67 @@ export function useOrdersByInvoice(invoiceId: string | null | undefined) {
     queryKey: invoiceId ? ordersKeys.byInvoice(invoiceId) : ['orders', 'byInvoice', 'disabled'],
     queryFn: () => fetchOrdersByInvoice(invoiceId!),
     enabled: !!invoiceId,
+  });
+}
+
+/**
+ * React Query hook to fetch order_people for an order
+ * @param orderId - UUID of the order (hook is disabled if orderId is falsy)
+ */
+export function useOrderPeople(orderId: string | null | undefined) {
+  return useQuery({
+    queryKey: orderId ? ordersKeys.orderPeople(orderId) : ['orders', 'orderPeople', 'disabled'],
+    queryFn: () => fetchOrderPeople(orderId!),
+    enabled: !!orderId,
+  });
+}
+
+/**
+ * React Query hook to save order_people for an order
+ */
+export function useSaveOrderPeople(orderId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (people: { person_id: string; is_primary: boolean }[]) =>
+      upsertOrderPeople(orderId, people),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ordersKeys.orderPeople(orderId) });
+      queryClient.invalidateQueries({ queryKey: ordersKeys.detail(orderId) });
+      queryClient.invalidateQueries({ queryKey: ordersKeys.all });
+      queryClient.invalidateQueries({ queryKey: ['orders', 'byInvoice'] });
+      queryClient.invalidateQueries({ queryKey: mapOrdersKeys.all });
+    },
+  });
+}
+
+/**
+ * Mutation to save order_people when orderId is known only at call time (e.g. after create)
+ */
+export function useSaveOrderPeopleMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ orderId, people }: { orderId: string; people: { person_id: string; is_primary: boolean }[] }) =>
+      upsertOrderPeople(orderId, people),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ordersKeys.orderPeople(variables.orderId) });
+      queryClient.invalidateQueries({ queryKey: ordersKeys.detail(variables.orderId) });
+      queryClient.invalidateQueries({ queryKey: ordersKeys.all });
+      queryClient.invalidateQueries({ queryKey: ['orders', 'byInvoice'] });
+      queryClient.invalidateQueries({ queryKey: mapOrdersKeys.all });
+    },
+  });
+}
+
+/**
+ * React Query hook to fetch orders by person ID
+ * @param personId - UUID of the customer (person) (hook is disabled if personId is falsy)
+ * @returns React Query result with orders array
+ */
+export function useOrdersByPersonId(personId: string | null | undefined) {
+  return useQuery({
+    queryKey: personId ? ordersKeys.byPerson(personId) : ['orders', 'byPerson', 'disabled'],
+    queryFn: () => fetchOrdersByPersonId(personId!),
+    enabled: !!personId,
   });
 }
 

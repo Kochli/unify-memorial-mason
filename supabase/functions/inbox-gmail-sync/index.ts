@@ -86,52 +86,33 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     // Get access token via refresh token
-const tokenBody = new URLSearchParams({
-  grant_type: 'refresh_token',
-  client_id: clientId.trim(),
-  client_secret: clientSecret.trim(),
-  refresh_token: refreshToken.trim(),
-}).toString();
+    const tokenBody = new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: clientId.trim(),
+      client_secret: clientSecret.trim(),
+      refresh_token: refreshToken.trim(),
+    }).toString();
 
-const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-  body: tokenBody,
-});
-
-if (!tokenResponse.ok) {
-  const errorText = await tokenResponse.text();
-  console.error('Gmail OAuth error', {
-    status: tokenResponse.status,
-    statusText: tokenResponse.statusText,
-    errorText,
-    clientIdSuffix: clientId.slice(-8), // safe
-    refreshTokenPrefix: refreshToken.slice(0, 6), // safe (optional)
-  });
-  return new Response(JSON.stringify({ error: 'Failed to authenticate with Gmail' }), {
-    status: 502,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  });
-}
-
+    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: tokenBody,
+    });
 
     if (!tokenResponse.ok) {
-  const errorText = await tokenResponse.text();
-  console.error('Gmail OAuth error', {
-    status: tokenResponse.status,
-    statusText: tokenResponse.statusText,
-    errorText,
-  });
-
-  return new Response(
-    JSON.stringify({ error: 'Failed to authenticate with Gmail' }),
-    {
-      status: 502,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    },
-  );
-}
-
+      const errorText = await tokenResponse.text();
+      console.error('Gmail OAuth error', {
+        status: tokenResponse.status,
+        statusText: tokenResponse.statusText,
+        errorText,
+        clientIdSuffix: clientId.slice(-8), // safe
+        refreshTokenPrefix: refreshToken.slice(0, 6), // safe (optional)
+      });
+      return new Response(JSON.stringify({ error: 'Failed to authenticate with Gmail' }), {
+        status: 502,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     const tokenData = await tokenResponse.json() as { access_token: string };
     const accessToken = tokenData.access_token;
@@ -162,6 +143,7 @@ if (!tokenResponse.ok) {
       console.error('Gmail messages.list error', {
         status: messagesListResponse.status,
         statusText: messagesListResponse.statusText,
+        errorText,
       });
       return new Response(
         JSON.stringify({ error: 'Failed to fetch Gmail messages' }),
@@ -256,7 +238,6 @@ if (!tokenResponse.ok) {
         }
 
         // Extract body text
-        let bodyText = '';
         const extractBodyText = (payload: GmailMessageResponse['payload']): string => {
           if (payload.body?.data) {
             try {
@@ -271,10 +252,9 @@ if (!tokenResponse.ok) {
                 try {
                   return atob(part.body.data.replace(/-/g, '+').replace(/_/g, '/'));
                 } catch {
-                  // Continue to next part
+                  // Continue
                 }
               }
-              // Check nested parts
               if (part.parts) {
                 for (const nestedPart of part.parts) {
                   if (nestedPart.mimeType === 'text/plain' && nestedPart.body?.data) {
@@ -291,23 +271,18 @@ if (!tokenResponse.ok) {
           return '';
         };
 
-        bodyText = extractBodyText(message.payload);
-        if (!bodyText) {
-          // Fallback to snippet
-          bodyText = message.snippet || '';
-        }
+        let bodyText = extractBodyText(message.payload);
+        if (!bodyText) bodyText = message.snippet || '';
 
-        // Find or create conversation based on threadId
+        // Find or create conversation based on Gmail threadId (by scanning recent messages)
         let conversationId: string;
 
-        // Find conversation by checking messages with matching threadId
-        // Since JSONB queries are complex, we'll fetch recent email messages and filter
         const { data: recentMessages } = await supabase
           .from('inbox_messages')
           .select('conversation_id, meta')
           .eq('channel', 'email')
-          .limit(1000); // Reasonable limit for finding thread
-        
+          .limit(1000);
+
         let existingConversationId: string | null = null;
         if (recentMessages) {
           for (const msg of recentMessages) {
@@ -322,7 +297,6 @@ if (!tokenResponse.ok) {
         if (existingConversationId) {
           conversationId = existingConversationId;
         } else {
-          // Create new conversation
           const { data: newConversation, error: convError } = await supabase
             .from('inbox_conversations')
             .insert({
@@ -346,13 +320,20 @@ if (!tokenResponse.ok) {
           conversationId = newConversation.id;
         }
 
-        // Check for duplicate message by fetching recent messages and checking meta
+        // Auto-link conversation to People (customers) by strict email match
+        try {
+          await attemptAutoLink(supabase, conversationId, "email", primaryHandle);
+        } catch (e) {
+          console.error("inbox-gmail-sync: auto-link failed", e);
+        }
+
+        // Check for duplicate message
         const { data: recentMsgs } = await supabase
           .from('inbox_messages')
           .select('id, meta')
           .eq('channel', 'email')
           .limit(1000);
-        
+
         const existingMsg = recentMsgs?.find((msg) => {
           const meta = msg.meta as { gmail?: { messageId?: string } } | null;
           return meta?.gmail?.messageId === message.id;
@@ -404,7 +385,6 @@ if (!tokenResponse.ok) {
             updated_at: new Date().toISOString(),
           };
 
-          // Update last_message_at if this message is newer
           const existingLastMessageAt = conversation.last_message_at
             ? new Date(conversation.last_message_at).getTime()
             : 0;
@@ -413,7 +393,6 @@ if (!tokenResponse.ok) {
             updateData.last_message_at = sentAt;
           }
 
-          // Increment unread_count for inbound messages when status is open
           if (direction === 'inbound' && conversation.status === 'open') {
             updateData.unread_count = (conversation.unread_count || 0) + 1;
           }
@@ -451,3 +430,72 @@ if (!tokenResponse.ok) {
     );
   }
 });
+
+type LinkState = "linked" | "unlinked" | "ambiguous";
+
+async function attemptAutoLink(
+  supabaseAdmin: any,
+  conversationId: string,
+  channel: "email" | "sms" | "whatsapp",
+  primaryHandleRaw: string,
+) {
+  const { data: conv, error: convErr } = await supabaseAdmin
+    .from("inbox_conversations")
+    .select("id, person_id")
+    .eq("id", conversationId)
+    .maybeSingle();
+
+  if (convErr) throw convErr;
+  if (!conv) return;
+  if (conv.person_id) return;
+
+  const primaryHandle = (primaryHandleRaw ?? "").trim();
+  if (!primaryHandle) {
+    await updateLinkState(supabaseAdmin, conversationId, "unlinked", null, {});
+    return;
+  }
+
+  const matchColumn = channel === "email" ? "email" : "phone";
+  const { data: matches, error: matchErr } = await supabaseAdmin
+    .from("customers")
+    .select("id")
+    .eq(matchColumn, primaryHandle);
+
+  if (matchErr) throw matchErr;
+
+  const ids = (matches ?? []).map((m: any) => m.id);
+
+  if (ids.length === 1) {
+    await updateLinkState(supabaseAdmin, conversationId, "linked", ids[0], {});
+    return;
+  }
+
+  if (ids.length > 1) {
+    await updateLinkState(supabaseAdmin, conversationId, "ambiguous", null, {
+      candidates: ids,
+      matched_on: matchColumn,
+    });
+    return;
+  }
+
+  await updateLinkState(supabaseAdmin, conversationId, "unlinked", null, {});
+}
+
+async function updateLinkState(
+  supabaseAdmin: any,
+  conversationId: string,
+  linkState: LinkState,
+  personId: string | null,
+  linkMeta: Record<string, unknown>,
+) {
+  const { error } = await supabaseAdmin
+    .from("inbox_conversations")
+    .update({
+      person_id: personId,
+      link_state: linkState,
+      link_meta: linkMeta,
+    })
+    .eq("id", conversationId);
+
+  if (error) throw error;
+}

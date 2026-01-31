@@ -31,6 +31,8 @@ import { Button } from '@/shared/components/ui/button';
 import { Plus, Trash2 } from 'lucide-react';
 import { 
   useUpdateOrder, 
+  useOrderPeople,
+  useSaveOrderPeople,
   useAdditionalOptionsByOrder,
   useCreateAdditionalOption,
   useUpdateAdditionalOption,
@@ -45,9 +47,7 @@ import { useMemorialsList } from '@/modules/memorials/hooks/useMemorials';
 import { transformMemorialsFromDb } from '@/modules/memorials/utils/memorialTransform';
 import type { UIMemorial } from '@/modules/memorials/utils/memorialTransform';
 import { useGeocodeOrderAddress } from '../hooks/useGeocodeOrderAddress';
-
-// Sentinel value for "no person selected" in Radix Select (cannot use empty string)
-const NO_PERSON_SENTINEL = '__none__';
+import { OrderPeoplePicker } from './OrderPeoplePicker';
 
 interface EditOrderDrawerProps {
   open: boolean;
@@ -66,6 +66,8 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
   const { mutate: deleteOption } = useDeleteAdditionalOption();
   const { toast } = useToast();
   const { data: customers } = useCustomersList();
+  const { data: orderPeople } = useOrderPeople(order.id);
+  const { mutateAsync: saveOrderPeople } = useSaveOrderPeople(order.id);
   const { data: existingOptions } = useAdditionalOptionsByOrder(order.id);
   const { data: memorialsData } = useMemorialsList();
   const [selectedProductId, setSelectedProductId] = useState<string>('');
@@ -145,6 +147,10 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
   const form = useForm<OrderFormData>({
     resolver: zodResolver(orderFormSchema),
     defaultValues: {
+      order_people:
+        order.person_id != null
+          ? [{ person_id: order.person_id, is_primary: true }]
+          : ([] as { person_id: string; is_primary: boolean }[]),
       person_id: order.person_id || null,
       customer_name: order.customer_name,
       customer_email: order.customer_email || '',
@@ -193,7 +199,14 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
         : '';
       
       // Reset form WITHOUT additional_options (handled separately via existingOptions)
+      // order_people: hydrate from orderPeople effect; fallback to order.person_id for legacy
+      const initialOrderPeople =
+        order.person_id != null
+          ? [{ person_id: order.person_id, is_primary: true }]
+          : ([] as { person_id: string; is_primary: boolean }[]);
+
       form.reset({
+        order_people: initialOrderPeople,
         person_id: order.person_id || null,
         customer_name: order.customer_name,
         customer_email: order.customer_email || '',
@@ -234,6 +247,21 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
       setLastGeocodeResult(null);
     }
   }, [open, order, lastOrderId, form]);
+
+  // Hydrate order_people from useOrderPeople (overrides legacy fallback when data loads)
+  useEffect(() => {
+    if (open && order && orderPeople !== undefined) {
+      if (orderPeople.length > 0) {
+        form.setValue(
+          'order_people',
+          orderPeople.map((op) => ({
+            person_id: op.person_id,
+            is_primary: op.is_primary,
+          }))
+        );
+      }
+    }
+  }, [open, order, orderPeople, form]);
 
   // Hydrate additional_options from useAdditionalOptionsByOrder hook (single source of truth)
   // Only when drawer is open and options data is available (not undefined, even if empty array)
@@ -301,21 +329,17 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
     return parts.length > 0 ? parts.join('\n\n') : null;
   };
 
-  const onSubmit = (data: OrderFormData) => {
-    // Get person name if person_id is selected
-    const selectedCustomer = data.person_id ? customers?.find(c => c.id === data.person_id) : null;
-    const personName = selectedCustomer ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}` : null;
+  const onSubmit = async (data: OrderFormData) => {
+    const people = data.order_people || [];
+    if (people.length === 0) return;
 
     // Build notes with dimensions prefix
     const notesValue = buildNotes(dimensions, data.notes || '');
 
-    // Convert empty strings to null for optional fields
-    // Exclude additional_options from orderData (handled separately)
-    const { additional_options, ...orderDataWithoutOptions } = data;
+    // Exclude additional_options, order_people, person_id, person_name, latitude, longitude (saveOrderPeople handles people; geocoding owns coords)
+    const { additional_options, order_people: _orderPeople, person_id: _pid, person_name: _pname, latitude: _lat, longitude: _lng, ...orderDataWithoutOptions } = data;
     const orderData = {
       ...orderDataWithoutOptions,
-      person_id: data.person_id || null,
-      person_name: personName,
       customer_email: data.customer_email || null,
       customer_phone: data.customer_phone || null,
       sku: data.sku || null,
@@ -347,6 +371,7 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
         : 0, // Send 0 for New Memorial (NOT NULL DEFAULT 0, cannot send null)
     };
 
+    await saveOrderPeople(people);
     updateOrder(
       { id: order.id, updates: orderData },
       {
@@ -564,37 +589,21 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
             <div className="space-y-4 p-4 pb-4 overflow-y-auto flex-1">
             {/* Person Assignment */}
             <div className="space-y-4">
-              <h3 className="text-sm font-semibold">Person Assignment</h3>
+              <h3 className="text-sm font-semibold">People *</h3>
               <FormField
                 control={form.control}
-                name="person_id"
+                name="order_people"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Person (Optional)</FormLabel>
-                    <Select
-                      value={field.value || NO_PERSON_SENTINEL}
-                      onValueChange={(value) => {
-                        if (value === NO_PERSON_SENTINEL) {
-                          field.onChange(null);
-                        } else {
-                          field.onChange(value);
-                        }
-                      }}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select person (optional)" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value={NO_PERSON_SENTINEL}>None</SelectItem>
-                        {customers?.map((customer) => (
-                          <SelectItem key={customer.id} value={customer.id}>
-                            {customer.first_name} {customer.last_name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <FormLabel>Select at least one person</FormLabel>
+                    <FormControl>
+                      <OrderPeoplePicker
+                        value={field.value}
+                        onChange={field.onChange}
+                        customers={customers ?? []}
+                        disabled={isPending}
+                      />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -1353,7 +1362,10 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={isPending}>
+              <Button
+                type="submit"
+                disabled={isPending || (form.watch('order_people')?.length ?? 0) === 0}
+              >
                 {isPending ? 'Updating...' : 'Save Changes'}
               </Button>
             </DrawerFooter>

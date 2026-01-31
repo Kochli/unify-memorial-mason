@@ -29,7 +29,7 @@ import {
 } from '@/shared/components/ui/select';
 import { Button } from '@/shared/components/ui/button';
 import { Plus, Trash2 } from 'lucide-react';
-import { useCreateOrder, useCreateAdditionalOption } from '../hooks/useOrders';
+import { useCreateOrder, useCreateAdditionalOption, useSaveOrderPeopleMutation } from '../hooks/useOrders';
 import { useGeocodeOrderAddress } from '../hooks/useGeocodeOrderAddress';
 import { orderFormSchema, type OrderFormData } from '../schemas/order.schema';
 import { useToast } from '@/shared/hooks/use-toast';
@@ -38,9 +38,7 @@ import { useMemorialsList } from '@/modules/memorials/hooks/useMemorials';
 import { transformMemorialsFromDb } from '@/modules/memorials/utils/memorialTransform';
 import type { UIMemorial } from '@/modules/memorials/utils/memorialTransform';
 import { useCustomersList } from '@/modules/customers/hooks/useCustomers';
-
-// Sentinel value for "no person selected" in Radix Select (cannot use empty string)
-const NO_PERSON_SENTINEL = '__none__';
+import { OrderPeoplePicker } from './OrderPeoplePicker';
 
 interface CreateOrderDrawerProps {
   open: boolean;
@@ -55,6 +53,7 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
 }) => {
   const { mutate: createOrder, isPending } = useCreateOrder();
   const { mutate: createOption } = useCreateAdditionalOption();
+  const { mutateAsync: saveOrderPeople } = useSaveOrderPeopleMutation();
   const geocodeMutation = useGeocodeOrderAddress();
   const { toast } = useToast();
   const { data: memorialsData } = useMemorialsList();
@@ -113,13 +112,12 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
   const form = useForm<OrderFormData>({
     resolver: zodResolver(orderFormSchema),
     defaultValues: {
+      order_people: [] as { person_id: string; is_primary: boolean }[],
       person_id: null,
       customer_name: '',
       order_type: undefined,
       sku: '',
       location: '',
-      latitude: null,
-      longitude: null,
       material: '',
       color: '',
       value: null,
@@ -173,12 +171,15 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
     }
   }, [orderType, form]);
 
-  const onSubmit = (data: OrderFormData) => {
+  const onSubmit = async (data: OrderFormData) => {
+    const people = data.order_people || [];
+    if (people.length === 0) return;
+
     // Build notes with dimensions prefix
     const notesValue = buildNotes(dimensions, data.notes || '');
 
-    // Get person name if person_id is selected
-    const selectedCustomer = data.person_id ? customers?.find(c => c.id === data.person_id) : null;
+    const primary = people.find((p) => p.is_primary) ?? people[0];
+    const selectedCustomer = customers?.find((c) => c.id === primary.person_id);
     const personName = selectedCustomer ? `${selectedCustomer.first_name} ${selectedCustomer.last_name}` : null;
 
     // Build order payload - DO NOT include productId or dimensions (form-only fields)
@@ -189,8 +190,8 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
       sku: data.sku.trim() || null, // Convert empty string to null if optional
       order_type: data.order_type,
       
-      // Person assignment (optional)
-      person_id: data.person_id || null,
+      // Person assignment (primary for backward compat)
+      person_id: primary.person_id,
       person_name: personName,
       
       // Snapshot fields (editable)
@@ -223,10 +224,6 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
       
       notes: notesValue,
       
-      // Coordinates
-      latitude: data.latitude ?? null,
-      longitude: data.longitude ?? null,
-      
       // Removed fields (set to defaults)
       customer_email: null,
       customer_phone: null,
@@ -246,7 +243,8 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
     };
 
     createOrder(orderData, {
-      onSuccess: (createdOrder) => {
+      onSuccess: async (createdOrder) => {
+        await saveOrderPeople({ orderId: createdOrder.id, people });
         // After order is successfully created, trigger geocoding in the background
         const locationForGeocode = data.location?.trim();
         if (locationForGeocode && locationForGeocode.length >= 6) {
@@ -421,43 +419,21 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
 
               {/* Person Assignment */}
               <div className="space-y-4">
-                <h3 className="text-sm font-semibold">Person Assignment</h3>
+                <h3 className="text-sm font-semibold">People *</h3>
                 <FormField
                   control={form.control}
-                  name="person_id"
+                  name="order_people"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Person (Optional)</FormLabel>
-                      <Select
-                        value={field.value || NO_PERSON_SENTINEL}
-                        onValueChange={(value) => {
-                          if (value === NO_PERSON_SENTINEL) {
-                            field.onChange(null);
-                            form.setValue('person_name', null);
-                          } else {
-                            field.onChange(value);
-                            // Set person_name snapshot
-                            const customer = customers?.find(c => c.id === value);
-                            if (customer) {
-                              form.setValue('person_name', `${customer.first_name} ${customer.last_name}`);
-                            }
-                          }
-                        }}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select person (optional)" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value={NO_PERSON_SENTINEL}>None</SelectItem>
-                          {customers?.map((customer) => (
-                            <SelectItem key={customer.id} value={customer.id}>
-                              {customer.first_name} {customer.last_name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <FormLabel>Select at least one person</FormLabel>
+                      <FormControl>
+                        <OrderPeoplePicker
+                          value={field.value}
+                          onChange={field.onChange}
+                          customers={customers ?? []}
+                          disabled={isPending}
+                        />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -523,51 +499,6 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
                         <FormLabel>Grave Number *</FormLabel>
                         <FormControl>
                           <Input placeholder="e.g., Plot 123, Section A" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-              </div>
-
-              {/* Coordinates */}
-              <div className="space-y-4">
-                <h3 className="text-sm font-semibold">Coordinates (Optional)</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <FormField
-                    control={form.control}
-                    name="latitude"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Latitude</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="number"
-                            step="0.00000001"
-                            placeholder="e.g., 51.5074"
-                            value={field.value ?? ''}
-                            onChange={(e) => field.onChange(e.target.value ? parseFloat(e.target.value) : null)}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <FormField
-                    control={form.control}
-                    name="longitude"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Longitude</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="number"
-                            step="0.00000001"
-                            placeholder="e.g., -0.1278"
-                            value={field.value ?? ''}
-                            onChange={(e) => field.onChange(e.target.value ? parseFloat(e.target.value) : null)}
-                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -853,7 +784,10 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={isPending}>
+              <Button
+                type="submit"
+                disabled={isPending || (form.watch('order_people')?.length ?? 0) === 0}
+              >
                 {isPending ? 'Creating...' : 'Create'}
               </Button>
             </DrawerFooter>

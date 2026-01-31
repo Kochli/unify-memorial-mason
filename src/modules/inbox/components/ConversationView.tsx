@@ -3,11 +3,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
-import { Mail, Phone, MessageSquare, Send } from 'lucide-react';
+import { Mail, Phone, MessageSquare, Send, Link2, User } from 'lucide-react';
 import { Textarea } from "@/shared/components/ui/textarea";
 import { useConversation } from "@/modules/inbox/hooks/useInboxConversations";
 import { useMessagesByConversation, useSendReply } from "@/modules/inbox/hooks/useInboxMessages";
+import { useCustomer } from '@/modules/customers/hooks/useCustomers';
 import { formatMessageTimestamp } from "@/modules/inbox/utils/conversationUtils";
+import { LinkConversationModal } from './LinkConversationModal';
 
 interface ConversationViewProps {
   conversationId: string | null;
@@ -16,14 +18,17 @@ interface ConversationViewProps {
 export const ConversationView: React.FC<ConversationViewProps> = ({ conversationId }) => {
   const [replyText, setReplyText] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const { data: conversation } = useConversation(conversationId);
   const { data: messages = [] } = useMessagesByConversation(conversationId);
+  const { data: person } = useCustomer(conversation?.person_id ?? '');
   const sendReplyMutation = useSendReply();
 
-  // Auto-scroll to bottom when messages change
+  // Auto-scroll messages container to bottom when messages change (do not scroll the page)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = messagesContainerRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'auto' });
   }, [messages]);
 
   const handleSendReply = () => {
@@ -71,22 +76,72 @@ export const ConversationView: React.FC<ConversationViewProps> = ({ conversation
     );
   }
 
+  const isUnlinked = !conversation.person_id || ((conversation.link_state ?? 'unlinked') !== 'linked');
+  const isAmbiguous = (conversation.link_state ?? 'unlinked') === 'ambiguous';
+  const personDisplay = person
+    ? [person.first_name, person.last_name].filter(Boolean).join(' ').trim() || person.email || person.phone || '—'
+    : null;
+
   return (
     <div className="h-full flex flex-col">
+      {/* Link banner when unlinked or ambiguous */}
+      {isUnlinked && (
+        <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-md flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Link2 className="h-4 w-4 text-amber-600" />
+            <span className="text-sm">
+              {isAmbiguous ? 'Choose person (multiple matches)' : 'Not linked to a person'}
+            </span>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setLinkModalOpen(true)}>
+            {isAmbiguous ? 'Choose person' : 'Link person'}
+          </Button>
+        </div>
+      )}
+
+      <LinkConversationModal
+        open={linkModalOpen}
+        onOpenChange={setLinkModalOpen}
+        conversationId={conversation.id}
+        conversationPersonId={conversation.person_id}
+        candidates={conversation.link_meta?.candidates}
+        onLinked={() => setLinkModalOpen(false)}
+        onUnlinked={() => setLinkModalOpen(false)}
+      />
+
       {/* Contact Details Header */}
       <Card className="mb-4">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <Avatar>
-                <AvatarFallback>{conversation.primary_handle.substring(0, 2).toUpperCase()}</AvatarFallback>
+                <AvatarFallback>
+                  {personDisplay
+                    ? personDisplay.substring(0, 2).toUpperCase()
+                    : conversation.primary_handle.substring(0, 2).toUpperCase()}
+                </AvatarFallback>
               </Avatar>
               <div>
-                <CardTitle className="text-lg">{conversation.primary_handle}</CardTitle>
-                <p className="text-sm text-slate-600">{conversation.subject || 'No subject'}</p>
+                <CardTitle className="text-lg">
+                  {personDisplay ?? conversation.primary_handle}
+                </CardTitle>
+                <p className="text-sm text-slate-600">
+                  {conversation.subject || (personDisplay ? conversation.primary_handle : 'No subject')}
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-2">
+              {personDisplay && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setLinkModalOpen(true)}
+                >
+                  <User className="h-3 w-3 mr-1" />
+                  Change link
+                </Button>
+              )}
               {conversation.unread_count > 0 && (
                 <Badge variant="default" className="bg-blue-500">
                   {conversation.unread_count} unread
@@ -106,7 +161,7 @@ export const ConversationView: React.FC<ConversationViewProps> = ({ conversation
           <CardTitle className="text-base">Conversation</CardTitle>
         </CardHeader>
         <CardContent className="flex-1 flex flex-col">
-          <div className="flex-1 space-y-4 overflow-y-auto max-h-96 mb-4">
+          <div ref={messagesContainerRef} className="flex-1 space-y-4 overflow-y-auto max-h-96 mb-4">
             {messages.length === 0 ? (
               <div className="text-center text-slate-400 py-8">
                 <p>No messages in this conversation</p>
@@ -137,7 +192,6 @@ export const ConversationView: React.FC<ConversationViewProps> = ({ conversation
                 );
               })
             )}
-            <div ref={messagesEndRef} />
           </div>
 
           {/* Reply Box */}

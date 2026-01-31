@@ -19,7 +19,7 @@ import { CustomerDetailsPopover } from '@/shared/components/customer/CustomerDet
 import type { Invoice } from '../types/invoicing.types';
 import { ColumnsDialog } from '@/shared/tableViewPresets/components/ColumnsDialog';
 import { usePresetsByModule } from '@/shared/tableViewPresets/hooks/useTableViewPresets';
-import { applyPresetToState, getDefaultState } from '@/shared/tableViewPresets/utils/columnState';
+import { applyPresetToState, getDefaultState, extractStateToConfig } from '@/shared/tableViewPresets/utils/columnState';
 import { getColumnDefinitions } from '@/shared/tableViewPresets/config/defaultColumns';
 import type { ColumnState } from '@/shared/tableViewPresets/types/tableViewPresets.types';
 import { invoiceColumnDefinitions } from '../components/invoiceColumnDefinitions';
@@ -42,6 +42,7 @@ export const InvoicingPage: React.FC = () => {
   const [resizeStartX, setResizeStartX] = useState(0);
   const [resizeStartWidth, setResizeStartWidth] = useState(0);
   const resizeRef = useRef<HTMLDivElement>(null);
+  const columnStateInitializedRef = useRef(false);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
@@ -82,8 +83,24 @@ export const InvoicingPage: React.FC = () => {
     })();
   }, [searchParams, queryClient, setSearchParams, toast]);
 
-  // Load default preset on mount
+  // Load column state on mount: prefer localStorage (user's last session), else default preset
   useEffect(() => {
+    const storageKey = 'invoices_column_state';
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const config = JSON.parse(saved) as { version?: number; columns?: { visibility?: Record<string, boolean>; order?: string[]; widths?: Record<string, number> } };
+        if (config?.columns) {
+          const fullConfig = { version: config.version ?? 1, columns: config.columns };
+          const newState = applyPresetToState(fullConfig, 'invoices');
+          setColumnState(newState);
+          columnStateInitializedRef.current = true;
+          return;
+        }
+      }
+    } catch {
+      // Ignore parse errors
+    }
     if (presets) {
       const defaultPreset = presets.find(p => p.is_default);
       if (defaultPreset) {
@@ -91,7 +108,23 @@ export const InvoicingPage: React.FC = () => {
         setColumnState(newState);
       }
     }
+    columnStateInitializedRef.current = true;
   }, [presets]);
+
+  const handleColumnStateChange = useCallback((newState: ColumnState) => {
+    setColumnState(newState);
+  }, []);
+
+  // Persist column state to localStorage when it changes (after initial load)
+  useEffect(() => {
+    if (!columnStateInitializedRef.current) return;
+    try {
+      const config = extractStateToConfig(columnState);
+      localStorage.setItem('invoices_column_state', JSON.stringify(config));
+    } catch {
+      // Ignore persistence errors
+    }
+  }, [columnState]);
 
   // Transform invoices from DB format to UI format
   const uiInvoices = useMemo(() => {
@@ -490,7 +523,7 @@ export const InvoicingPage: React.FC = () => {
         open={columnsDialogOpen}
         onOpenChange={setColumnsDialogOpen}
         columnState={columnState}
-        onColumnStateChange={setColumnState}
+        onColumnStateChange={handleColumnStateChange}
         availableColumns={getColumnDefinitions('invoices')}
       />
     </div>
