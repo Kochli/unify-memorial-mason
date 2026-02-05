@@ -30,7 +30,7 @@ export const PeopleSidebar: React.FC<PeopleSidebarProps> = ({ selectedPersonId, 
   }, [customers, searchQuery]);
 
   return (
-    <div className="flex flex-col h-full border-r bg-slate-50/50 w-56 shrink-0">
+    <div className="flex flex-col h-full border-r bg-slate-50/50 w-full min-w-0 shrink-0">
       <div className="p-2 border-b">
         <div className="relative">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />

@@ -32,9 +32,7 @@ export const UnifiedInboxPage: React.FC = () => {
   const filters = React.useMemo<ConversationFilters>(() => {
     const base: ConversationFilters = { status: 'open' };
     
-    if (activeTab === 'unread') {
-      base.unread_only = true;
-    } else if (activeTab === 'email') {
+    if (activeTab === 'email') {
       base.channel = 'email';
     } else if (activeTab === 'sms') {
       base.channel = 'sms';
@@ -158,28 +156,27 @@ export const UnifiedInboxPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex gap-0 min-h-[480px]">
-        {/* People Sidebar */}
-        <PeopleSidebar
-          selectedPersonId={selectedPersonId}
-          onSelectPerson={setSelectedPersonId}
-        />
-        {/* Conversations List + Conversation View */}
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-6 min-w-0">
-        {/* Conversations List */}
-        <div>
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-5">
+      <div className="grid grid-cols-1 lg:grid-cols-[180px_260px_1fr] gap-4 min-h-[480px] min-w-0">
+        {/* People column: 180px, scroll contained */}
+        <div className="h-full min-h-0 flex flex-col overflow-hidden">
+          <PeopleSidebar
+            selectedPersonId={selectedPersonId}
+            onSelectPerson={setSelectedPersonId}
+          />
+        </div>
+        {/* Conversations column: 260px, scroll contained */}
+        <div className="h-full min-h-0 flex flex-col overflow-hidden">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col min-h-0">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="all" className="relative">
                 All
               </TabsTrigger>
-              <TabsTrigger value="unread">Unread</TabsTrigger>
               <TabsTrigger value="email">Email</TabsTrigger>
               <TabsTrigger value="sms">SMS</TabsTrigger>
               <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
             </TabsList>
 
-            <TabsContent value={activeTab} className="space-y-4">
+            <TabsContent value={activeTab} className="flex-1 min-h-0 overflow-auto space-y-2 mt-2">
               {isLoading ? (
                 <Card className="p-8 text-center">
                   <div className="text-slate-400">
@@ -209,35 +206,35 @@ export const UnifiedInboxPage: React.FC = () => {
                       selectedConversationId === conversation.id ? "ring-2 ring-blue-500" : ""}`}
                     onClick={() => setSelectedConversationId(conversation.id)}
                   >
-                    <CardHeader className="pb-2">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-3">
+                    <CardHeader className="p-2.5 pb-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
                           <input
                             type="checkbox"
                             checked={selectedItems.includes(conversation.id)}
                             onChange={() => toggleSelection(conversation.id)}
-                            className="rounded"
+                            className="rounded shrink-0"
                             onClick={(e) => e.stopPropagation()}
                           />
                           {getIcon(conversation.channel)}
-                          <div className="flex-1">
-                            <div className="font-medium">{conversation.primary_handle}</div>
-                            <div className="text-sm text-slate-600 truncate">
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium truncate">{conversation.primary_handle}</div>
+                            <div className="text-sm text-slate-600 line-clamp-1">
                               {conversation.subject || conversation.last_message_preview || ''}
                             </div>
                           </div>
                         </div>
-                        <div className="text-xs text-slate-500">
+                        <div className="text-xs text-slate-500 shrink-0">
                           {formatConversationTimestamp(conversation.last_message_at)}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 ml-9">
+                      <div className="flex items-center gap-2 ml-7 mt-1">
                         {conversation.unread_count > 0 && (
-                          <Badge variant="default" className="bg-blue-500">
+                          <Badge variant="default" className="bg-blue-500 text-xs px-2 py-0.5">
                             {conversation.unread_count} unread
                           </Badge>
                         )}
-                        <Badge variant="outline" className="capitalize">
+                        <Badge variant="outline" className="capitalize text-xs px-2 py-0.5">
                           {conversation.channel}
                         </Badge>
                       </div>
@@ -249,9 +246,9 @@ export const UnifiedInboxPage: React.FC = () => {
           </Tabs>
         </div>
 
-        {/* Conversation View + Person Orders Panel */}
-        <div className="flex flex-col gap-4">
-          <div className="min-h-[200px]">
+        {/* Conversation panel column: 1fr, message list scrolls inside ConversationView */}
+        <div className="min-h-0 flex flex-col gap-4">
+          <div className="flex-1 min-h-[200px] min-w-0 flex flex-col">
             <ConversationView conversationId={selectedConversationId} />
           </div>
           <PersonOrdersPanel
@@ -260,7 +257,6 @@ export const UnifiedInboxPage: React.FC = () => {
             onSelectOrder={setSelectedOrderId}
             onCloseOrder={() => setSelectedOrderId(null)}
           />
-        </div>
         </div>
       </div>
     </div>
