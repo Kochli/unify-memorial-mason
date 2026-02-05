@@ -167,13 +167,31 @@ export const UnifiedInboxPage: React.FC = () => {
         {/* Conversations column: 260px, scroll contained */}
         <div className="h-full min-h-0 flex flex-col overflow-hidden">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col min-h-0">
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="all" className="relative">
+            <TabsList className="grid w-full grid-cols-4 gap-1 bg-muted/40 p-1 rounded-lg w-full h-auto">
+              <TabsTrigger
+                value="all"
+                className="h-8 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md"
+              >
                 All
               </TabsTrigger>
-              <TabsTrigger value="email">Email</TabsTrigger>
-              <TabsTrigger value="sms">SMS</TabsTrigger>
-              <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
+              <TabsTrigger
+                value="email"
+                className="h-8 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md"
+              >
+                Email
+              </TabsTrigger>
+              <TabsTrigger
+                value="sms"
+                className="h-8 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md"
+              >
+                SMS
+              </TabsTrigger>
+              <TabsTrigger
+                value="whatsapp"
+                className="h-8 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md"
+              >
+                WhatsApp
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value={activeTab} className="flex-1 min-h-0 overflow-auto space-y-2 mt-2">
@@ -200,15 +218,18 @@ export const UnifiedInboxPage: React.FC = () => {
                 </Card>
               ) : (
                 conversations.map((conversation) => (
-                  <Card 
-                    key={conversation.id} 
-                    className={`cursor-pointer transition-all hover:shadow-md ${
-                      selectedConversationId === conversation.id ? "ring-2 ring-blue-500" : ""}`}
+                  <Card
+                    key={conversation.id}
+                    className={`cursor-pointer transition-all rounded-md border-b last:border-b-0 hover:bg-muted/30 ${
+                      selectedConversationId === conversation.id
+                        ? 'bg-muted/50 ring-1 ring-primary/30 border-l-2 border-l-primary'
+                        : ''
+                    }`}
                     onClick={() => setSelectedConversationId(conversation.id)}
                   >
-                    <CardHeader className="p-2.5 pb-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <CardHeader className="p-2">
+                      <div className="flex items-center justify-between gap-1.5">
+                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
                           <input
                             type="checkbox"
                             checked={selectedItems.includes(conversation.id)}
@@ -218,23 +239,23 @@ export const UnifiedInboxPage: React.FC = () => {
                           />
                           {getIcon(conversation.channel)}
                           <div className="min-w-0 flex-1">
-                            <div className="font-medium truncate">{conversation.primary_handle}</div>
-                            <div className="text-sm text-slate-600 line-clamp-1">
+                            <div className="text-xs font-medium truncate">{conversation.primary_handle}</div>
+                            <div className="text-[11px] text-muted-foreground truncate leading-tight">
                               {conversation.subject || conversation.last_message_preview || ''}
                             </div>
                           </div>
                         </div>
-                        <div className="text-xs text-slate-500 shrink-0">
+                        <div className="text-[10px] text-muted-foreground shrink-0">
                           {formatConversationTimestamp(conversation.last_message_at)}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 ml-7 mt-1">
+                      <div className="flex items-center gap-1.5 ml-6 mt-0.5">
                         {conversation.unread_count > 0 && (
-                          <Badge variant="default" className="bg-blue-500 text-xs px-2 py-0.5">
+                          <Badge variant="default" className="bg-blue-500 text-[10px] px-1.5 py-0.5 rounded-sm">
                             {conversation.unread_count} unread
                           </Badge>
                         )}
-                        <Badge variant="outline" className="capitalize text-xs px-2 py-0.5">
+                        <Badge variant="outline" className="capitalize text-[10px] px-1.5 py-0.5 rounded-sm">
                           {conversation.channel}
                         </Badge>
                       </div>
