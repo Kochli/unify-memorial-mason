@@ -10,7 +10,7 @@ import {
   unlinkConversation,
 } from '../api/inboxConversations.api';
 import { syncGmail } from '../api/inboxGmail.api';
-import type { ConversationFilters } from '../types/inbox.types';
+import type { InboxConversation, ConversationFilters } from '../types/inbox.types';
 
 export const inboxKeys = {
   conversations: {
@@ -27,6 +27,52 @@ export const inboxKeys = {
     all: ['inbox', 'channels'] as const,
   },
 };
+
+function updateConversationUnreadCountInCache(
+  value: unknown,
+  ids: string[],
+  targetUnreadCount: number
+): unknown {
+  if (!value) return value;
+
+  // Case A: value is InboxConversation[]
+  if (Array.isArray(value)) {
+    return (value as InboxConversation[]).map((conversation) =>
+      ids.includes(conversation.id)
+        ? { ...conversation, unread_count: targetUnreadCount }
+        : conversation
+    );
+  }
+
+  if (typeof value === 'object') {
+    const obj: any = value;
+
+    // Case B: value is { data: InboxConversation[] }
+    if (Array.isArray(obj.data)) {
+      return {
+        ...obj,
+        data: (obj.data as InboxConversation[]).map((conversation) =>
+          ids.includes(conversation.id)
+            ? { ...conversation, unread_count: targetUnreadCount }
+            : conversation
+        ),
+      };
+    }
+
+    // Case C: value is { pages: Array<...> } (infinite query)
+    if (Array.isArray(obj.pages)) {
+      return {
+        ...obj,
+        pages: obj.pages.map((page: unknown) =>
+          updateConversationUnreadCountInCache(page, ids, targetUnreadCount)
+        ),
+      };
+    }
+  }
+
+  // Case D: unknown shape – leave unchanged
+  return value;
+}
 
 export function useConversationsList(filters?: ConversationFilters) {
   return useQuery({
@@ -53,17 +99,10 @@ export function useMarkAsRead() {
       // Optimistically set unread_count = 0 for targeted conversations
       const previous = queryClient.getQueriesData<unknown>({ queryKey: inboxKeys.conversations.all });
 
-      previous.forEach(([key, value]) => {
-        const conversations = value as InboxConversation[] | undefined;
-        if (!conversations) return;
-
-        const updated = conversations.map((conversation) =>
-          ids.includes(conversation.id)
-            ? { ...conversation, unread_count: 0 }
-            : conversation
+      previous.forEach(([key]) => {
+        queryClient.setQueryData(key, (old: unknown) =>
+          updateConversationUnreadCountInCache(old, ids, 0)
         );
-
-        queryClient.setQueryData(key, updated);
       });
 
       return { previous };
@@ -92,17 +131,10 @@ export function useMarkAsUnread() {
       // Optimistically set unread_count = 1 for targeted conversations
       const previous = queryClient.getQueriesData<unknown>({ queryKey: inboxKeys.conversations.all });
 
-      previous.forEach(([key, value]) => {
-        const conversations = value as InboxConversation[] | undefined;
-        if (!conversations) return;
-
-        const updated = conversations.map((conversation) =>
-          ids.includes(conversation.id)
-            ? { ...conversation, unread_count: 1 }
-            : conversation
+      previous.forEach(([key]) => {
+        queryClient.setQueryData(key, (old: unknown) =>
+          updateConversationUnreadCountInCache(old, ids, 1)
         );
-
-        queryClient.setQueryData(key, updated);
       });
 
       return { previous };
