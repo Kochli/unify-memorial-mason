@@ -1,14 +1,8 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/shared/components/ui/drawer';
+import { Drawer, DrawerContent, useOnDrawerReset } from '@/shared/components/ui/drawer';
+import { AppDrawerLayout, DrawerSection, DrawerGrid } from '@/shared/components/drawer';
 import {
   Form,
   FormControl,
@@ -89,24 +83,38 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
     },
   });
 
-  // Reset form when drawer opens
+  const didInitRef = useRef(false);
+
+  // Clear any draft state when the drawer has been closed
+  useOnDrawerReset(() => {
+    form.reset();
+    didInitRef.current = false;
+  });
+
+  // Initialize form once per open cycle to avoid overwriting user input while typing
   useEffect(() => {
-    if (open) {
-      form.reset({
-        order_ids: initialOrderIds,
-        assigned_people_ids: [],
-        worker_ids: [],
-        location_name: initialLocation,
-        address: '',
-        latitude: null,
-        longitude: null,
-        status: 'scheduled',
-        scheduled_date: null,
-        estimated_duration: '',
-        priority: 'medium',
-        notes: '',
-      });
+    if (!open) {
+      didInitRef.current = false;
+      return;
     }
+    if (didInitRef.current) return;
+
+    form.reset({
+      order_ids: initialOrderIds,
+      assigned_people_ids: [],
+      worker_ids: [],
+      location_name: initialLocation,
+      address: '',
+      latitude: null,
+      longitude: null,
+      status: 'scheduled',
+      scheduled_date: null,
+      estimated_duration: '',
+      priority: 'medium',
+      notes: '',
+    });
+
+    didInitRef.current = true;
   }, [open, form, initialOrderIds, initialLocation]);
 
   // Auto-fill location from first selected Order (only if not provided via initialLocation)
@@ -211,21 +219,35 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[96vh] flex flex-col">
-        <DrawerHeader>
-          <DrawerTitle>Create Job</DrawerTitle>
-          <DrawerDescription>Add a new installation job with orders.</DrawerDescription>
-        </DrawerHeader>
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col flex-1 min-h-0">
-            <div className="space-y-4 px-4 pb-4 overflow-y-auto flex-1">
+      <DrawerContent className="flex flex-col max-h-[96vh] min-h-0">
+        <div data-jobs-drawer-root className="flex flex-col flex-1 min-h-0">
+          <Form {...form}>
+            <form
+              onSubmit={form.handleSubmit(onSubmit)}
+              className="flex flex-col flex-1 min-h-0"
+            >
+            <AppDrawerLayout
+              title="Create Job"
+              description="Add a new installation job with orders."
+              onClose={() => onOpenChange(false)}
+              primaryLabel={isPending ? 'Creating...' : 'Create'}
+              primaryDisabled={isPending}
+              primaryType="submit"
+              onSecondary={() => onOpenChange(false)}
+            >
+            <div
+              data-jobs-drawer-safety
+              className="relative"
+              style={{ pointerEvents: 'auto' }}
+            >
+            <div className="space-y-4 px-4 pb-4">
               {/* Orders Multi-Select */}
               <FormField
                 control={form.control}
                 name="order_ids"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Orders *</FormLabel>
+                    <FormLabel className="text-xs font-medium">Orders *</FormLabel>
                     <div className="border rounded-md p-4 max-h-60 overflow-y-auto">
                       {availableOrders.length === 0 ? (
                         <p className="text-sm text-muted-foreground">No available orders</p>
@@ -254,7 +276,7 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                         ))
                       )}
                     </div>
-                    <FormMessage />
+                    <FormMessage className="text-[11px]" />
                   </FormItem>
                 )}
               />
@@ -265,7 +287,7 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                 name="assigned_people_ids"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Assigned People (Optional)</FormLabel>
+                    <FormLabel className="text-xs font-medium">Assigned People (Optional)</FormLabel>
                     <div className="border rounded-md p-4 max-h-60 overflow-y-auto">
                       {!customers || customers.length === 0 ? (
                         <p className="text-sm text-muted-foreground">No people available</p>
@@ -294,7 +316,7 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                         ))
                       )}
                     </div>
-                    <FormMessage />
+                    <FormMessage className="text-[11px]" />
                   </FormItem>
                 )}
               />
@@ -305,7 +327,7 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                 name="worker_ids"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Assigned Workers (Optional)</FormLabel>
+                    <FormLabel className="text-xs font-medium">Assigned Workers (Optional)</FormLabel>
                     <div className="border rounded-md p-4 max-h-60 overflow-y-auto">
                       {!workers || workers.length === 0 ? (
                         <p className="text-sm text-muted-foreground">No workers available</p>
@@ -334,7 +356,7 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                         ))
                       )}
                     </div>
-                    <FormMessage />
+                    <FormMessage className="text-[11px]" />
                   </FormItem>
                 )}
               />
@@ -345,11 +367,11 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                 name="location_name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Location Name *</FormLabel>
+                    <FormLabel className="text-xs font-medium">Location Name *</FormLabel>
                     <FormControl>
-                      <Input placeholder="Enter cemetery/location name" {...field} />
+                      <Input className="h-9" placeholder="Enter cemetery/location name" {...field} />
                     </FormControl>
-                    <FormMessage />
+                    <FormMessage className="text-[11px]" />
                   </FormItem>
                 )}
               />
@@ -359,11 +381,11 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                 name="address"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Address *</FormLabel>
+                    <FormLabel className="text-xs font-medium">Address *</FormLabel>
                     <FormControl>
-                      <Input placeholder="Enter address" {...field} />
+                      <Input className="h-9" placeholder="Enter address" {...field} />
                     </FormControl>
-                    <FormMessage />
+                    <FormMessage className="text-[11px]" />
                   </FormItem>
                 )}
               />
@@ -374,13 +396,13 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                   name="status"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Status *</FormLabel>
+                      <FormLabel className="text-xs font-medium">Status *</FormLabel>
                       <Select 
                         onValueChange={field.onChange} 
                         value={field.value || 'scheduled'}
                       >
                         <FormControl>
-                          <SelectTrigger>
+                          <SelectTrigger className="h-9">
                             <SelectValue />
                           </SelectTrigger>
                         </FormControl>
@@ -392,7 +414,7 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                           <SelectItem value="cancelled">Cancelled</SelectItem>
                         </SelectContent>
                       </Select>
-                      <FormMessage />
+                      <FormMessage className="text-[11px]" />
                     </FormItem>
                   )}
                 />
@@ -402,13 +424,13 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                   name="priority"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Priority *</FormLabel>
+                      <FormLabel className="text-xs font-medium">Priority *</FormLabel>
                       <Select 
                         onValueChange={field.onChange} 
                         value={field.value || 'medium'}
                       >
                         <FormControl>
-                          <SelectTrigger>
+                          <SelectTrigger className="h-9">
                             <SelectValue />
                           </SelectTrigger>
                         </FormControl>
@@ -418,7 +440,7 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                           <SelectItem value="high">High</SelectItem>
                         </SelectContent>
                       </Select>
-                      <FormMessage />
+                      <FormMessage className="text-[11px]" />
                     </FormItem>
                   )}
                 />
@@ -428,15 +450,15 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                 control={form.control}
                 name="scheduled_date"
                 render={({ field }) => (
-                  <FormItem className="flex flex-col">
-                    <FormLabel>Scheduled Date</FormLabel>
+                  <FormItem>
+                    <FormLabel className="text-xs font-medium">Scheduled Date</FormLabel>
                     <Popover>
                       <PopoverTrigger asChild>
                         <FormControl>
                           <Button
                             variant="outline"
                             className={cn(
-                              'w-full pl-3 text-left font-normal',
+                              'h-9 w-full pl-3 text-left font-normal text-xs',
                               !field.value && 'text-muted-foreground'
                             )}
                           >
@@ -474,7 +496,7 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                         />
                       </PopoverContent>
                     </Popover>
-                    <FormMessage />
+                    <FormMessage className="text-[11px]" />
                   </FormItem>
                 )}
               />
@@ -484,11 +506,11 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                 name="estimated_duration"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Estimated Duration</FormLabel>
+                    <FormLabel className="text-xs font-medium">Estimated Duration</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g., 2 hours" {...field} />
+                      <Input className="h-9" placeholder="e.g., 2 hours" {...field} />
                     </FormControl>
-                    <FormMessage />
+                    <FormMessage className="text-[11px]" />
                   </FormItem>
                 )}
               />
@@ -499,9 +521,10 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                   name="latitude"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Latitude</FormLabel>
+                      <FormLabel className="text-xs font-medium">Latitude</FormLabel>
                       <FormControl>
                         <Input
+                          className="h-9"
                           type="number"
                           step="any"
                           placeholder="e.g., 40.7128"
@@ -510,7 +533,7 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                           value={field.value ?? ''}
                         />
                       </FormControl>
-                      <FormMessage />
+                      <FormMessage className="text-[11px]" />
                     </FormItem>
                   )}
                 />
@@ -520,9 +543,10 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                   name="longitude"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Longitude</FormLabel>
+                      <FormLabel className="text-xs font-medium">Longitude</FormLabel>
                       <FormControl>
                         <Input
+                          className="h-9"
                           type="number"
                           step="any"
                           placeholder="e.g., -74.0060"
@@ -531,7 +555,7 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                           value={field.value ?? ''}
                         />
                       </FormControl>
-                      <FormMessage />
+                      <FormMessage className="text-[11px]" />
                     </FormItem>
                   )}
                 />
@@ -542,35 +566,25 @@ export const CreateJobDrawer: React.FC<CreateJobDrawerProps> = ({
                 name="notes"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Notes</FormLabel>
+                    <FormLabel className="text-xs font-medium">Notes</FormLabel>
                     <FormControl>
                       <Textarea
                         placeholder="Add any additional notes..."
-                        className="resize-none"
+                        className="min-h-[60px] resize-none"
+                        rows={2}
                         {...field}
                       />
                     </FormControl>
-                    <FormMessage />
+                    <FormMessage className="text-[11px]" />
                   </FormItem>
                 )}
               />
             </div>
-
-            <DrawerFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-                disabled={isPending}
-              >
-                Cancel
-              </Button>
-              <Button type="submit" disabled={isPending}>
-                {isPending ? 'Creating...' : 'Create'}
-              </Button>
-            </DrawerFooter>
-          </form>
-        </Form>
+            </div>
+            </AppDrawerLayout>
+            </form>
+          </Form>
+        </div>
       </DrawerContent>
     </Drawer>
   );

@@ -1,14 +1,7 @@
 import React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/shared/components/ui/drawer';
+import { Drawer, DrawerContent, useOnDrawerReset } from '@/shared/components/ui/drawer';
 import {
   Form,
   FormControl,
@@ -19,11 +12,11 @@ import {
 } from '@/shared/components/ui/form';
 import { Input } from '@/shared/components/ui/input';
 import { Textarea } from '@/shared/components/ui/textarea';
-import { Button } from '@/shared/components/ui/button';
 import { useCreateCompany } from '../hooks/useCompanies';
 import { companyFormSchema, type CompanyFormData } from '../schemas/company.schema';
 import { toCompanyInsert, parseTeamMembers } from '../utils/companyTransform';
 import { useToast } from '@/shared/hooks/use-toast';
+import { AppDrawerLayout, DrawerSection, DrawerGrid } from '@/shared/components/drawer';
 
 interface CreateCompanyDrawerProps {
   open: boolean;
@@ -51,6 +44,11 @@ export const CreateCompanyDrawer: React.FC<CreateCompanyDrawerProps> = ({
     },
   });
 
+  // Clear any draft state when the drawer has been closed
+  useOnDrawerReset(() => {
+    form.reset();
+  });
+
   const onSubmit = (values: CompanyFormData) => {
     const payload = toCompanyInsert(values);
     createCompany(payload, {
@@ -74,26 +72,31 @@ export const CreateCompanyDrawer: React.FC<CreateCompanyDrawerProps> = ({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[96vh] flex flex-col">
-        <DrawerHeader>
-          <DrawerTitle>Create Company</DrawerTitle>
-          <DrawerDescription>Add a new company record.</DrawerDescription>
-        </DrawerHeader>
-
+      <DrawerContent className="flex flex-col max-h-[96vh] min-h-0">
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col flex-1 min-h-0">
-            <div className="space-y-4 p-4 pb-4 overflow-y-auto flex-1">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FormField
+            <AppDrawerLayout
+              title="Create Company"
+              description="Add a new company record."
+              primaryLabel={isPending ? 'Creating...' : 'Create'}
+              primaryDisabled={isPending}
+              primaryType="submit"
+              secondaryLabel="Cancel"
+              onSecondary={() => onOpenChange(false)}
+              onClose={() => onOpenChange(false)}
+            >
+              <DrawerSection title="Details">
+                <DrawerGrid cols={2}>
+                  <FormField
                 control={form.control}
                 name="name"
                 render={({ field }) => (
-                  <FormItem className="md:col-span-2">
-                    <FormLabel>Company Name *</FormLabel>
+                  <FormItem className="sm:col-span-2">
+                    <FormLabel className="text-xs font-medium">Company Name *</FormLabel>
                     <FormControl>
-                      <Input placeholder="Acme Corporation" {...field} />
+                      <Input className="h-9" placeholder="Acme Corporation" {...field} />
                     </FormControl>
-                    <FormMessage />
+                    <FormMessage className="text-[11px]" />
                   </FormItem>
                 )}
               />
@@ -103,81 +106,77 @@ export const CreateCompanyDrawer: React.FC<CreateCompanyDrawerProps> = ({
                 name="email"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Email</FormLabel>
+                    <FormLabel className="text-xs font-medium">Email</FormLabel>
                     <FormControl>
-                      <Input type="email" placeholder="contact@example.com" {...field} />
+                      <Input className="h-9" type="email" placeholder="contact@example.com" {...field} />
                     </FormControl>
-                    <FormMessage />
+                    <FormMessage className="text-[11px]" />
                   </FormItem>
                 )}
               />
-
               <FormField
                 control={form.control}
                 name="phone"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Phone</FormLabel>
+                    <FormLabel className="text-xs font-medium">Phone</FormLabel>
                     <FormControl>
-                      <Input placeholder="+44 123 456 7890" {...field} />
+                      <Input className="h-9" placeholder="+44 123 456 7890" {...field} />
                     </FormControl>
-                    <FormMessage />
+                    <FormMessage className="text-[11px]" />
                   </FormItem>
                 )}
               />
-
               <FormField
                 control={form.control}
                 name="address"
                 render={({ field }) => (
-                  <FormItem className="md:col-span-2">
-                    <FormLabel>Address</FormLabel>
+                  <FormItem className="sm:col-span-2">
+                    <FormLabel className="text-xs font-medium">Address</FormLabel>
                     <FormControl>
-                      <Input placeholder="123 Main Street" {...field} />
+                      <Input className="h-9" placeholder="123 Main Street" {...field} />
                     </FormControl>
-                    <FormMessage />
+                    <FormMessage className="text-[11px]" />
                   </FormItem>
                 )}
               />
-
               <FormField
                 control={form.control}
                 name="city"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>City</FormLabel>
+                    <FormLabel className="text-xs font-medium">City</FormLabel>
                     <FormControl>
-                      <Input placeholder="London" {...field} />
+                      <Input className="h-9" placeholder="London" {...field} />
                     </FormControl>
-                    <FormMessage />
+                    <FormMessage className="text-[11px]" />
                   </FormItem>
                 )}
               />
-
               <FormField
                 control={form.control}
                 name="country"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Country</FormLabel>
+                    <FormLabel className="text-xs font-medium">Country</FormLabel>
                     <FormControl>
-                      <Input placeholder="United Kingdom" {...field} />
+                      <Input className="h-9" placeholder="United Kingdom" {...field} />
                     </FormControl>
-                    <FormMessage />
+                    <FormMessage className="text-[11px]" />
                   </FormItem>
                 )}
               />
-
               <FormField
                 control={form.control}
                 name="team_members"
                 render={({ field }) => (
-                  <FormItem className="md:col-span-2">
-                    <FormLabel>Team Members</FormLabel>
+                  <FormItem className="sm:col-span-2">
+                    <FormLabel className="text-xs font-medium">Team Members</FormLabel>
                     <FormControl>
                       <Textarea
+                        className="min-h-[80px]"
                         placeholder="Enter names separated by commas or new lines (e.g., John Doe, Jane Smith)"
-                        rows={4}
+                        rows={3}
                         value={field.value.join(', ')}
                         onChange={(e) => {
                           const parsed = parseTeamMembers(e.target.value);
@@ -185,43 +184,31 @@ export const CreateCompanyDrawer: React.FC<CreateCompanyDrawerProps> = ({
                         }}
                       />
                     </FormControl>
-                    <FormMessage />
-                    <p className="text-xs text-muted-foreground">
+                    <FormMessage className="text-[11px]" />
+                    <p className="text-[11px] text-muted-foreground">
                       Separate names with commas or new lines
                     </p>
                   </FormItem>
                 )}
               />
-
-              <FormField
-                control={form.control}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem className="md:col-span-2">
-                    <FormLabel>Notes</FormLabel>
-                    <FormControl>
-                      <Textarea placeholder="Additional notes..." rows={3} {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-            </div>
-
-            <DrawerFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-                disabled={isPending}
-              >
-                Cancel
-              </Button>
-              <Button type="submit" disabled={isPending}>
-                {isPending ? 'Creating...' : 'Create'}
-              </Button>
-            </DrawerFooter>
+                </DrawerGrid>
+              </DrawerSection>
+              <DrawerSection title="Notes" collapsible defaultOpen={false}>
+                <FormField
+                  control={form.control}
+                  name="notes"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs font-medium">Notes</FormLabel>
+                      <FormControl>
+                        <Textarea className="min-h-[60px]" placeholder="Additional notes..." rows={2} {...field} />
+                      </FormControl>
+                      <FormMessage className="text-[11px]" />
+                    </FormItem>
+                  )}
+                />
+              </DrawerSection>
+            </AppDrawerLayout>
           </form>
         </Form>
       </DrawerContent>

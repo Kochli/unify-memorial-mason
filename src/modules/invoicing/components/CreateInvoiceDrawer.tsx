@@ -1,14 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/shared/components/ui/drawer';
+import { Drawer, DrawerContent, useOnDrawerReset } from '@/shared/components/ui/drawer';
+import { AppDrawerLayout } from '@/shared/components/drawer';
 import {
   Form,
   FormControl,
@@ -126,6 +120,14 @@ export const CreateInvoiceDrawer: React.FC<CreateInvoiceDrawerProps> = ({
       payment_date: null,
       notes: null,
     },
+  });
+
+  // Clear any draft state when the drawer has been closed
+  useOnDrawerReset(() => {
+    form.reset();
+    setOrders([]);
+    setSelectedProductIds({});
+    setDimensions({});
   });
 
   // Update form with calculated amount
@@ -347,16 +349,18 @@ export const CreateInvoiceDrawer: React.FC<CreateInvoiceDrawerProps> = ({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[96vh] flex flex-col">
-        <DrawerHeader>
-          <DrawerTitle>Create New Invoice</DrawerTitle>
-          <DrawerDescription>
-            Fill in the details to create a new invoice with orders.
-          </DrawerDescription>
-        </DrawerHeader>
-
+      <DrawerContent className="flex flex-col max-h-[96vh] min-h-0">
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col flex-1 min-h-0">
+            <AppDrawerLayout
+              title="Create New Invoice"
+              description="Fill in the details to create a new invoice with orders."
+              onClose={() => onOpenChange(false)}
+              primaryLabel={isPending ? 'Creating...' : 'Create'}
+              primaryDisabled={isPending}
+              primaryType="submit"
+              onSecondary={() => onOpenChange(false)}
+            >
             <div className="space-y-4 p-4 pb-4 overflow-y-auto flex-1">
               {/* Person Information */}
               <div className="space-y-4">
@@ -623,20 +627,7 @@ export const CreateInvoiceDrawer: React.FC<CreateInvoiceDrawerProps> = ({
                 )}
               />
             </div>
-
-            <DrawerFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-                disabled={isPending}
-              >
-                Cancel
-              </Button>
-              <Button type="submit" disabled={isPending}>
-                {isPending ? 'Creating...' : 'Create'}
-              </Button>
-            </DrawerFooter>
+            </AppDrawerLayout>
           </form>
         </Form>
       </DrawerContent>

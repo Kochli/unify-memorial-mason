@@ -1,14 +1,8 @@
 import React, { useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/shared/components/ui/drawer';
+import { Drawer, DrawerContent, useOnDrawerReset } from '@/shared/components/ui/drawer';
+import { AppDrawerLayout } from '@/shared/components/drawer';
 import {
   Form,
   FormControl,
@@ -102,6 +96,11 @@ export const EditInvoiceDrawer: React.FC<EditInvoiceDrawerProps> = ({
     }
   }, [calculatedAmount, linkedOrders, form]);
 
+  // Clear any draft state when the drawer has been closed
+  useOnDrawerReset(() => {
+    form.reset();
+  });
+
   const onSubmit = (data: InvoiceFormData) => {
     // Convert undefined to null for optional fields
     const invoiceData = {
@@ -136,16 +135,18 @@ export const EditInvoiceDrawer: React.FC<EditInvoiceDrawerProps> = ({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[96vh] flex flex-col">
-        <DrawerHeader>
-          <DrawerTitle>Edit Invoice</DrawerTitle>
-          <DrawerDescription>
-            Update the details for invoice {invoice.invoice_number}.
-          </DrawerDescription>
-        </DrawerHeader>
-
+      <DrawerContent className="flex flex-col max-h-[96vh] min-h-0">
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col flex-1 min-h-0">
+            <AppDrawerLayout
+              title="Edit Invoice"
+              description={`Update the details for invoice ${invoice.invoice_number}.`}
+              onClose={() => onOpenChange(false)}
+              primaryLabel={isPending ? 'Updating...' : 'Save Changes'}
+              primaryDisabled={isPending}
+              primaryType="submit"
+              onSecondary={() => onOpenChange(false)}
+            >
             <div className="space-y-4 p-4 pb-4 overflow-y-auto flex-1">
               {/* Invoice Number (Read-only) */}
               <FormItem>
@@ -426,20 +427,7 @@ export const EditInvoiceDrawer: React.FC<EditInvoiceDrawerProps> = ({
             />
 
             </div>
-
-            <DrawerFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-                disabled={isPending}
-              >
-                Cancel
-              </Button>
-              <Button type="submit" disabled={isPending}>
-                {isPending ? 'Updating...' : 'Save Changes'}
-              </Button>
-            </DrawerFooter>
+            </AppDrawerLayout>
           </form>
         </Form>
       </DrawerContent>

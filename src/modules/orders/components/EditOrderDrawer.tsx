@@ -1,14 +1,8 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/shared/components/ui/drawer';
+import { Drawer, DrawerContent, useOnDrawerReset } from '@/shared/components/ui/drawer';
+import { AppDrawerLayout } from '@/shared/components/drawer';
 import {
   Form,
   FormControl,
@@ -48,6 +42,8 @@ import { transformMemorialsFromDb } from '@/modules/memorials/utils/memorialTran
 import type { UIMemorial } from '@/modules/memorials/utils/memorialTransform';
 import { useGeocodeOrderAddress } from '../hooks/useGeocodeOrderAddress';
 import { OrderPeoplePicker } from './OrderPeoplePicker';
+import { usePermitForms } from '@/modules/permitForms/hooks/usePermitForms';
+import { PermitFormPicker } from './PermitFormPicker';
 
 interface EditOrderDrawerProps {
   open: boolean;
@@ -66,6 +62,7 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
   const { mutate: deleteOption } = useDeleteAdditionalOption();
   const { toast } = useToast();
   const { data: customers } = useCustomersList();
+  const { data: permitFormsData } = usePermitForms();
   const { data: orderPeople } = useOrderPeople(order.id);
   const { mutateAsync: saveOrderPeople } = useSaveOrderPeople(order.id);
   const { data: existingOptions } = useAdditionalOptionsByOrder(order.id);
@@ -169,6 +166,7 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
       location: order.location || '',
       value: order.value,
       permit_cost: order.permit_cost,
+      permit_form_id: order.permit_form_id ?? null,
       renovation_service_description: order.renovation_service_description,
       renovation_service_cost: order.renovation_service_cost,
       progress: order.progress,
@@ -225,6 +223,7 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
         location: order.location || '',
         value: order.value,
         permit_cost: order.permit_cost,
+        permit_form_id: order.permit_form_id ?? null,
         renovation_service_description: order.renovation_service_description,
         renovation_service_cost: order.renovation_service_cost,
         progress: order.progress,
@@ -314,6 +313,13 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
     }
   }, [orderType, form]);
 
+  // Clear any draft state when the drawer has been closed
+  useOnDrawerReset(() => {
+    form.reset();
+    setSelectedProductId('');
+    setDimensions('');
+  });
+
   // Build notes with dimensions prefix (same as CreateOrderDrawer)
   const buildNotes = (dimensions: string, notes: string): string | null => {
     const parts: string[] = [];
@@ -354,6 +360,7 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
       installation_date: data.installation_date || null,
       // DB constraint: permit_cost is NOT NULL DEFAULT 0, so we must send 0 (not null) when empty
       permit_cost: toMoneyNumber(data.permit_cost),
+      permit_form_id: data.permit_form_id ?? null,
       // Product photo URL snapshot: Only for New Memorial orders, null for Renovation
       product_photo_url: data.order_type === 'Renovation' 
         ? null // Renovation orders don't have product photos
@@ -576,16 +583,18 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[96vh] overflow-y-auto">
-        <DrawerHeader>
-          <DrawerTitle>Edit Order</DrawerTitle>
-          <DrawerDescription>
-            Update the details for this memorial order.
-          </DrawerDescription>
-        </DrawerHeader>
-
+      <DrawerContent className="flex flex-col max-h-[96vh] min-h-0">
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col flex-1 min-h-0">
+            <AppDrawerLayout
+              title="Edit Order"
+              description="Update the details for this memorial order."
+              onClose={() => onOpenChange(false)}
+              primaryLabel={isPending ? 'Updating...' : 'Save Changes'}
+              primaryDisabled={isPending || (form.watch('order_people')?.length ?? 0) === 0}
+              primaryType="submit"
+              onSecondary={() => onOpenChange(false)}
+            >
             <div className="space-y-4 p-4 pb-4 overflow-y-auto flex-1">
             {/* Person Assignment */}
             <div className="space-y-4">
@@ -1151,6 +1160,24 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
                 )}
                 <FormField
                   control={form.control}
+                  name="permit_form_id"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Permit form</FormLabel>
+                      <FormControl>
+                        <PermitFormPicker
+                          value={field.value}
+                          onChange={field.onChange}
+                          permitForms={permitFormsData ?? []}
+                          disabled={isPending}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
                   name="permit_cost"
                   render={({ field }) => (
                     <FormItem>
@@ -1352,23 +1379,7 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
             </div>
 
             </div>
-
-            <DrawerFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-                disabled={isPending}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={isPending || (form.watch('order_people')?.length ?? 0) === 0}
-              >
-                {isPending ? 'Updating...' : 'Save Changes'}
-              </Button>
-            </DrawerFooter>
+            </AppDrawerLayout>
           </form>
         </Form>
       </DrawerContent>

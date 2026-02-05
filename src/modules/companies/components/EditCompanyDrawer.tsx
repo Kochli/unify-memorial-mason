@@ -4,10 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import {
   Drawer,
   DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
+  useOnDrawerReset,
 } from '@/shared/components/ui/drawer';
 import {
   Form,
@@ -19,11 +16,11 @@ import {
 } from '@/shared/components/ui/form';
 import { Input } from '@/shared/components/ui/input';
 import { Textarea } from '@/shared/components/ui/textarea';
-import { Button } from '@/shared/components/ui/button';
 import { useUpdateCompany, type Company } from '../hooks/useCompanies';
 import { companyFormSchema, type CompanyFormData } from '../schemas/company.schema';
 import { toCompanyUpdate, parseTeamMembers, formatTeamMembers } from '../utils/companyTransform';
 import { useToast } from '@/shared/hooks/use-toast';
+import { AppDrawerLayout, DrawerSection, DrawerGrid } from '@/shared/components/drawer';
 
 interface EditCompanyDrawerProps {
   open: boolean;
@@ -68,6 +65,11 @@ export const EditCompanyDrawer: React.FC<EditCompanyDrawerProps> = ({
     }
   }, [open, company, form]);
 
+  // Clear any draft state when the drawer has been closed
+  useOnDrawerReset(() => {
+    form.reset();
+  });
+
   const onSubmit = (values: CompanyFormData) => {
     const payload = toCompanyUpdate(values);
     updateCompany(
@@ -93,151 +95,145 @@ export const EditCompanyDrawer: React.FC<EditCompanyDrawerProps> = ({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[96vh] overflow-y-auto">
-        <DrawerHeader>
-          <DrawerTitle>Edit Company</DrawerTitle>
-          <DrawerDescription>Update company details.</DrawerDescription>
-        </DrawerHeader>
-
+      <DrawerContent className="flex flex-col max-h-[96vh] min-h-0">
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 p-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem className="md:col-span-2">
-                    <FormLabel>Company Name *</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Acme Corporation" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email</FormLabel>
-                    <FormControl>
-                      <Input type="email" placeholder="contact@example.com" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="phone"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Phone</FormLabel>
-                    <FormControl>
-                      <Input placeholder="+44 123 456 7890" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="address"
-                render={({ field }) => (
-                  <FormItem className="md:col-span-2">
-                    <FormLabel>Address</FormLabel>
-                    <FormControl>
-                      <Input placeholder="123 Main Street" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="city"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>City</FormLabel>
-                    <FormControl>
-                      <Input placeholder="London" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="country"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Country</FormLabel>
-                    <FormControl>
-                      <Input placeholder="United Kingdom" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="team_members"
-                render={({ field }) => (
-                  <FormItem className="md:col-span-2">
-                    <FormLabel>Team Members</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="Enter names separated by commas or new lines"
-                        rows={4}
-                        value={formatTeamMembers(field.value)}
-                        onChange={(e) => {
-                          const parsed = parseTeamMembers(e.target.value);
-                          field.onChange(parsed);
-                        }}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                    <p className="text-xs text-muted-foreground">
-                      Separate names with commas or new lines
-                    </p>
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem className="md:col-span-2">
-                    <FormLabel>Notes</FormLabel>
-                    <FormControl>
-                      <Textarea placeholder="Additional notes..." rows={3} {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-
-            <DrawerFooter>
-              <Button type="submit" disabled={isPending}>
-                {isPending ? 'Updating...' : 'Update Company'}
-              </Button>
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                Cancel
-              </Button>
-            </DrawerFooter>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col flex-1 min-h-0">
+            <AppDrawerLayout
+              title="Edit Company"
+              description="Update company details."
+              primaryLabel={isPending ? 'Updating...' : 'Update Company'}
+              primaryDisabled={isPending}
+              primaryType="submit"
+              secondaryLabel="Cancel"
+              onSecondary={() => onOpenChange(false)}
+              onClose={() => onOpenChange(false)}
+            >
+              <DrawerSection title="Details">
+                <DrawerGrid cols={2}>
+                  <FormField
+                    control={form.control}
+                    name="name"
+                    render={({ field }) => (
+                      <FormItem className="sm:col-span-2">
+                        <FormLabel className="text-xs font-medium">Company Name *</FormLabel>
+                        <FormControl>
+                          <Input className="h-9" placeholder="Acme Corporation" {...field} />
+                        </FormControl>
+                        <FormMessage className="text-[11px]" />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs font-medium">Email</FormLabel>
+                        <FormControl>
+                          <Input className="h-9" type="email" placeholder="contact@example.com" {...field} />
+                        </FormControl>
+                        <FormMessage className="text-[11px]" />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="phone"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs font-medium">Phone</FormLabel>
+                        <FormControl>
+                          <Input className="h-9" placeholder="+44 123 456 7890" {...field} />
+                        </FormControl>
+                        <FormMessage className="text-[11px]" />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="address"
+                    render={({ field }) => (
+                      <FormItem className="sm:col-span-2">
+                        <FormLabel className="text-xs font-medium">Address</FormLabel>
+                        <FormControl>
+                          <Input className="h-9" placeholder="123 Main Street" {...field} />
+                        </FormControl>
+                        <FormMessage className="text-[11px]" />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="city"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs font-medium">City</FormLabel>
+                        <FormControl>
+                          <Input className="h-9" placeholder="London" {...field} />
+                        </FormControl>
+                        <FormMessage className="text-[11px]" />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="country"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-xs font-medium">Country</FormLabel>
+                        <FormControl>
+                          <Input className="h-9" placeholder="United Kingdom" {...field} />
+                        </FormControl>
+                        <FormMessage className="text-[11px]" />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="team_members"
+                    render={({ field }) => (
+                      <FormItem className="sm:col-span-2">
+                        <FormLabel className="text-xs font-medium">Team Members</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            className="min-h-[80px]"
+                            placeholder="Enter names separated by commas or new lines"
+                            rows={3}
+                            value={formatTeamMembers(field.value)}
+                            onChange={(e) => {
+                              const parsed = parseTeamMembers(e.target.value);
+                              field.onChange(parsed);
+                            }}
+                          />
+                        </FormControl>
+                        <FormMessage className="text-[11px]" />
+                        <p className="text-[11px] text-muted-foreground">
+                          Separate names with commas or new lines
+                        </p>
+                      </FormItem>
+                    )}
+                  />
+                </DrawerGrid>
+              </DrawerSection>
+              <DrawerSection title="Notes" collapsible defaultOpen={false}>
+                <FormField
+                  control={form.control}
+                  name="notes"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs font-medium">Notes</FormLabel>
+                      <FormControl>
+                        <Textarea className="min-h-[60px]" placeholder="Additional notes..." rows={2} {...field} />
+                      </FormControl>
+                      <FormMessage className="text-[11px]" />
+                    </FormItem>
+                  )}
+                />
+              </DrawerSection>
+            </AppDrawerLayout>
           </form>
         </Form>
       </DrawerContent>
     </Drawer>
   );
 };
-

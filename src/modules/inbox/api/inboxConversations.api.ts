@@ -81,6 +81,20 @@ export async function markConversationsAsRead(ids: string[]) {
   return (data || []) as InboxConversation[];
 }
 
+export async function markConversationsAsUnread(ids: string[]) {
+  if (ids.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from('inbox_conversations')
+    // For a count-only model, represent "unread" as at least 1 unread message
+    .update({ unread_count: 1 })
+    .in('id', ids)
+    .select();
+
+  if (error) throw error;
+  return (data || []) as InboxConversation[];
+}
+
 export async function archiveConversations(ids: string[]) {
   if (ids.length === 0) return [];
 

@@ -1,14 +1,7 @@
 import React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/shared/components/ui/drawer';
+import { Drawer, DrawerContent } from '@/shared/components/ui/drawer';
 import {
   Form,
   FormControl,
@@ -26,11 +19,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/shared/components/ui/select';
-import { Button } from '@/shared/components/ui/button';
 import { Checkbox } from '@/shared/components/ui/checkbox';
 import { useToast } from '@/shared/hooks/use-toast';
 import { workerFormSchema, type WorkerFormData } from '../schemas/worker.schema';
 import { useCreateWorker } from '../hooks/useWorkers';
+import { AppDrawerLayout, DrawerSection, DrawerGrid } from '@/shared/components/drawer';
 
 interface CreateWorkerDrawerProps {
   open: boolean;
@@ -88,23 +81,31 @@ export const CreateWorkerDrawer: React.FC<CreateWorkerDrawerProps> = ({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[96vh] overflow-y-auto">
-        <DrawerHeader>
-          <DrawerTitle>Create Worker</DrawerTitle>
-          <DrawerDescription>Add a new team member.</DrawerDescription>
-        </DrawerHeader>
+      <DrawerContent className="flex flex-col max-h-[96vh] min-h-0">
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 p-4">
+          <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col flex-1 min-h-0">
+            <AppDrawerLayout
+              title="Create Worker"
+              description="Add a new team member."
+              primaryLabel={isPending ? 'Creating...' : 'Create Worker'}
+              primaryDisabled={isPending}
+              primaryType="submit"
+              secondaryLabel="Cancel"
+              onSecondary={() => onOpenChange(false)}
+              onClose={() => onOpenChange(false)}
+            >
+              <DrawerSection>
+                <DrawerGrid cols={2}>
             <FormField
               control={form.control}
               name="full_name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Full Name</FormLabel>
+                  <FormLabel className="text-xs font-medium">Full Name</FormLabel>
                   <FormControl>
-                    <Input placeholder="John Smith" {...field} />
+                    <Input className="h-9" placeholder="John Smith" {...field} />
                   </FormControl>
-                  <FormMessage />
+                  <FormMessage className="text-[11px]" />
                 </FormItem>
               )}
             />
@@ -113,15 +114,16 @@ export const CreateWorkerDrawer: React.FC<CreateWorkerDrawerProps> = ({
               name="phone"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Phone</FormLabel>
+                  <FormLabel className="text-xs font-medium">Phone</FormLabel>
                   <FormControl>
                     <Input
+                      className="h-9"
                       placeholder="+44 20 1234 5678"
                       {...field}
                       value={field.value || ''}
                     />
                   </FormControl>
-                  <FormMessage />
+                  <FormMessage className="text-[11px]" />
                 </FormItem>
               )}
             />
@@ -130,10 +132,10 @@ export const CreateWorkerDrawer: React.FC<CreateWorkerDrawerProps> = ({
               name="role"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Role</FormLabel>
+                  <FormLabel className="text-xs font-medium">Role</FormLabel>
                   <Select onValueChange={field.onChange} defaultValue={field.value}>
                     <FormControl>
-                      <SelectTrigger>
+                      <SelectTrigger className="h-9">
                         <SelectValue placeholder="Select a role" />
                       </SelectTrigger>
                     </FormControl>
@@ -144,7 +146,7 @@ export const CreateWorkerDrawer: React.FC<CreateWorkerDrawerProps> = ({
                       <SelectItem value="other">Other</SelectItem>
                     </SelectContent>
                   </Select>
-                  <FormMessage />
+                  <FormMessage className="text-[11px]" />
                 </FormItem>
               )}
             />
@@ -153,15 +155,17 @@ export const CreateWorkerDrawer: React.FC<CreateWorkerDrawerProps> = ({
               name="notes"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Notes</FormLabel>
+                  <FormLabel className="text-xs font-medium">Notes</FormLabel>
                   <FormControl>
                     <Textarea
+                      className="min-h-[60px]"
                       placeholder="Additional notes about this worker..."
+                      rows={2}
                       {...field}
                       value={field.value || ''}
                     />
                   </FormControl>
-                  <FormMessage />
+                  <FormMessage className="text-[11px]" />
                 </FormItem>
               )}
             />
@@ -177,19 +181,14 @@ export const CreateWorkerDrawer: React.FC<CreateWorkerDrawerProps> = ({
                     />
                   </FormControl>
                   <div className="space-y-1 leading-none">
-                    <FormLabel>Active</FormLabel>
+                        <FormLabel className="text-xs font-medium">Active</FormLabel>
                   </div>
                 </FormItem>
               )}
             />
-            <DrawerFooter>
-              <Button type="submit" disabled={isPending}>
-                {isPending ? 'Creating...' : 'Create Worker'}
-              </Button>
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                Cancel
-              </Button>
-            </DrawerFooter>
+                </DrawerGrid>
+              </DrawerSection>
+            </AppDrawerLayout>
           </form>
         </Form>
       </DrawerContent>

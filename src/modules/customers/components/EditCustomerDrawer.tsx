@@ -57,6 +57,11 @@ export const EditCustomerDrawer: React.FC<EditCustomerDrawerProps> = ({
     values: defaultValues,
   });
 
+  // Clear any draft state when the drawer has been closed
+  useOnDrawerReset(() => {
+    form.reset();
+  });
+
   const onSubmit = (values: CustomerFormData) => {
     const payload = toCustomerUpdate(values);
     updateCustomer(

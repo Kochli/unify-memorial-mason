@@ -1,14 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/shared/components/ui/drawer';
+import { Drawer, DrawerContent, useOnDrawerReset } from '@/shared/components/ui/drawer';
+import { AppDrawerLayout } from '@/shared/components/drawer';
 import {
   Form,
   FormControl,
@@ -39,6 +33,8 @@ import { transformMemorialsFromDb } from '@/modules/memorials/utils/memorialTran
 import type { UIMemorial } from '@/modules/memorials/utils/memorialTransform';
 import { useCustomersList } from '@/modules/customers/hooks/useCustomers';
 import { OrderPeoplePicker } from './OrderPeoplePicker';
+import { usePermitForms } from '@/modules/permitForms/hooks/usePermitForms';
+import { PermitFormPicker } from './PermitFormPicker';
 
 interface CreateOrderDrawerProps {
   open: boolean;
@@ -58,6 +54,7 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
   const { toast } = useToast();
   const { data: memorialsData } = useMemorialsList();
   const { data: customers } = useCustomersList();
+  const { data: permitFormsData } = usePermitForms();
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [dimensions, setDimensions] = useState<string>('');
 
@@ -122,6 +119,7 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
       color: '',
       value: null,
       permit_cost: null,
+      permit_form_id: null,
       renovation_service_description: null,
       renovation_service_cost: null,
       notes: '',
@@ -171,6 +169,13 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
     }
   }, [orderType, form]);
 
+  // Clear any draft state when the drawer has been closed
+  useOnDrawerReset(() => {
+    form.reset();
+    setSelectedProductId('');
+    setDimensions('');
+  });
+
   const onSubmit = async (data: OrderFormData) => {
     const people = data.order_people || [];
     if (people.length === 0) return;
@@ -204,6 +209,8 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
       
       // DB constraint: permit_cost is NOT NULL DEFAULT 0, so we must send 0 (not null) when empty
       permit_cost: toMoneyNumber(data.permit_cost),
+
+      permit_form_id: data.permit_form_id ?? null,
       
       // Product photo URL snapshot: Only for New Memorial orders, null for Renovation
       product_photo_url: data.order_type === 'Renovation' 
@@ -376,16 +383,18 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[96vh] flex flex-col">
-        <DrawerHeader>
-          <DrawerTitle>Create New Order</DrawerTitle>
-          <DrawerDescription>
-            Fill in the details to create a new memorial order.
-          </DrawerDescription>
-        </DrawerHeader>
-
+      <DrawerContent className="flex flex-col max-h-[96vh] min-h-0">
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col flex-1 min-h-0">
+            <AppDrawerLayout
+              title="Create New Order"
+              description="Fill in the details to create a new memorial order."
+              onClose={() => onOpenChange(false)}
+              primaryLabel={isPending ? 'Creating...' : 'Create'}
+              primaryDisabled={isPending || (form.watch('order_people')?.length ?? 0) === 0}
+              primaryType="submit"
+              onSecondary={() => onOpenChange(false)}
+            >
             <div className="space-y-4 p-4 pb-4 overflow-y-auto flex-1">
               {/* Order Type */}
               <div className="space-y-4">
@@ -644,6 +653,24 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
               <div className="space-y-4">
                 <FormField
                   control={form.control}
+                  name="permit_form_id"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Permit form</FormLabel>
+                      <FormControl>
+                        <PermitFormPicker
+                          value={field.value}
+                          onChange={field.onChange}
+                          permitForms={permitFormsData ?? []}
+                          disabled={isPending}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
                   name="permit_cost"
                   render={({ field }) => (
                     <FormItem>
@@ -774,23 +801,7 @@ export const CreateOrderDrawer: React.FC<CreateOrderDrawerProps> = ({
                 />
               </div>
             </div>
-
-            <DrawerFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-                disabled={isPending}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={isPending || (form.watch('order_people')?.length ?? 0) === 0}
-              >
-                {isPending ? 'Creating...' : 'Create'}
-              </Button>
-            </DrawerFooter>
+            </AppDrawerLayout>
           </form>
         </Form>
       </DrawerContent>

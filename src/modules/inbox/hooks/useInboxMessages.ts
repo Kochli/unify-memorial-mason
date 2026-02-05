@@ -1,9 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchMessagesByConversation } from '../api/inboxMessages.api';
+import { useMemo } from 'react';
+import { fetchMessagesByConversation, fetchMessagesByConversationIds } from '../api/inboxMessages.api';
+import { fetchConversations } from '../api/inboxConversations.api';
 import { inboxKeys } from './useInboxConversations';
 import { sendTwilioMessage } from '../api/inboxTwilio.api';
 import { sendGmailReply } from '../api/inboxGmail.api';
 import { sendSmsReply } from '../api/inboxSms.api';
+import type { InboxMessage } from '../types/inbox.types';
 
 export function useMessagesByConversation(conversationId: string | null) {
   return useQuery({
@@ -11,6 +14,41 @@ export function useMessagesByConversation(conversationId: string | null) {
     queryFn: () => fetchMessagesByConversation(conversationId!),
     enabled: !!conversationId,
   });
+}
+
+/** Unified timeline for a person: all messages from all channels, chronological. */
+export function usePersonUnifiedTimeline(personId: string | null): {
+  messages: InboxMessage[];
+  isLoading: boolean;
+  isError: boolean;
+} {
+  const filters = useMemo(
+    () => (personId ? { status: 'open' as const, person_id: personId } : null),
+    [personId]
+  );
+  const { data: conversations = [], isLoading: conversationsLoading, isError: conversationsError } = useQuery({
+    queryKey: inboxKeys.conversations.lists(filters ?? undefined),
+    queryFn: () => fetchConversations(filters!),
+    enabled: !!personId && !!filters,
+  });
+  const conversationIds = useMemo(
+    () => (conversations?.map((c) => c.id) ?? []).slice().sort(),
+    [conversations]
+  );
+  const {
+    data: messages = [],
+    isLoading: messagesLoading,
+    isError: messagesError,
+  } = useQuery({
+    queryKey: inboxKeys.messages.personTimeline(personId ?? '', conversationIds),
+    queryFn: () => fetchMessagesByConversationIds(conversationIds),
+    enabled: !!personId && conversationIds.length > 0,
+  });
+  return {
+    messages,
+    isLoading: conversationsLoading || (!!personId && conversationIds.length > 0 && messagesLoading),
+    isError: conversationsError || messagesError,
+  };
 }
 
 export function useSendReply() {

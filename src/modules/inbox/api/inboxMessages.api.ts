@@ -12,6 +12,21 @@ export async function fetchMessagesByConversation(conversationId: string) {
   return (data || []) as InboxMessage[];
 }
 
+/** Client-only: fetch messages for multiple conversations, sorted by sent_at ascending. */
+export async function fetchMessagesByConversationIds(conversationIds: string[]): Promise<InboxMessage[]> {
+  if (conversationIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from('inbox_messages')
+    .select('*')
+    .in('conversation_id', conversationIds)
+    .order('sent_at', { ascending: true });
+
+  if (error) throw error;
+  const list = (data || []) as InboxMessage[];
+  list.sort((a, b) => new Date(a.sent_at || a.created_at).getTime() - new Date(b.sent_at || b.created_at).getTime());
+  return list;
+}
+
 export async function createMessage(message: InboxMessageInsert) {
   const { data, error } = await supabase
     .from('inbox_messages')

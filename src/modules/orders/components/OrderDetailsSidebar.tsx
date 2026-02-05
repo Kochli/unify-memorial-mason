@@ -20,7 +20,8 @@ import {
   Phone,
   Mail,
   Save,
-  XCircle
+  XCircle,
+  ExternalLink
 } from 'lucide-react';
 import { useUpdateOrder, useAdditionalOptionsByOrder } from '../hooks/useOrders';
 import { useToast } from '@/shared/hooks/use-toast';
@@ -29,6 +30,7 @@ import type { Order } from '../types/orders.types';
 import { useMessagesByOrder } from '@/modules/inbox/hooks/useMessages';
 import { getOrderTotalFormatted, getOrderBaseValue, getOrderPermitCost, getOrderAdditionalOptionsTotal } from '../utils/orderCalculations';
 import { useInscriptionsByOrderId } from '@/modules/inscriptions/hooks/useInscriptions';
+import { usePermitForm } from '@/modules/permitForms/hooks/usePermitForms';
 import { getOrderDisplayId } from '../utils/orderDisplayId';
 
 interface OrderDetailsSidebarProps {
@@ -45,6 +47,7 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
   const { data: messages, isLoading: isMessagesLoading } = useMessagesByOrder(order?.id ?? null);
   const { data: additionalOptions, isLoading: isOptionsLoading } = useAdditionalOptionsByOrder(order?.id ?? null);
   const { data: inscriptions, isLoading: isInscriptionsLoading } = useInscriptionsByOrderId(order?.id ?? null);
+  const { data: permitForm } = usePermitForm(order?.permit_form_id ?? null);
 
   if (!order) return null;
 
@@ -286,6 +289,24 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
                     <Badge className={getStatusColor(currentOrder.permit_status)}>
                       {currentOrder.permit_status.replace('_', ' ')}
                     </Badge>
+                  )}
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Permit Form</span>
+                  {permitForm ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium truncate max-w-[160px]">{permitForm.name}</span>
+                      {permitForm.link && (
+                        <Button variant="outline" size="sm" asChild>
+                          <a href={permitForm.link} target="_blank" rel="noreferrer">
+                            <ExternalLink className="h-4 w-4 mr-1" />
+                            Open
+                          </a>
+                        </Button>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">—</span>
                   )}
                 </div>
                 <div className="flex items-center justify-between">

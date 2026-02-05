@@ -1,14 +1,8 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/shared/components/ui/drawer';
+import { Drawer, DrawerContent, useOnDrawerReset } from '@/shared/components/ui/drawer';
+import { AppDrawerLayout, DrawerSection, DrawerGrid } from '@/shared/components/drawer';
 import {
   Form,
   FormControl,
@@ -105,8 +99,16 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
     mode: 'onBlur', // Only validate on blur, not on mount or change
   });
 
-  // Reset form when job or assignedWorkers changes
+  const didInitRef = useRef(false);
+
+  // Initialize form once per open cycle to avoid overwriting user input while typing
   useEffect(() => {
+    if (!open) {
+      didInitRef.current = false;
+      return;
+    }
+    if (didInitRef.current) return;
+
     form.reset({
       order_ids: job.order_id ? [job.order_id] : [],
       worker_ids: assignedWorkers?.map(w => w.id) || [],
@@ -122,7 +124,15 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
       priority: job.priority,
       notes: job.notes || '',
     });
-  }, [job, assignedWorkers, form]);
+
+    didInitRef.current = true;
+  }, [open, job, assignedWorkers, form]);
+
+  // Clear any draft state when the drawer has been closed
+  useOnDrawerReset(() => {
+    form.reset();
+    didInitRef.current = false;
+  });
 
   // Auto-fill customer and location when order is selected (using first order_id from order_ids array)
   const selectedOrderIds = form.watch('order_ids');
@@ -165,13 +175,28 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[96vh] overflow-y-auto">
-        <DrawerHeader>
-          <DrawerTitle>Edit Job</DrawerTitle>
-          <DrawerDescription>Update job information.</DrawerDescription>
-        </DrawerHeader>
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 px-4">
+      <DrawerContent className="flex flex-col max-h-[96vh] min-h-0">
+        <div data-jobs-drawer-root className="flex flex-col flex-1 min-h-0">
+          <Form {...form}>
+            <form
+              onSubmit={form.handleSubmit(onSubmit)}
+              className="flex flex-col flex-1 min-h-0"
+            >
+            <AppDrawerLayout
+              title="Edit Job"
+              description="Update job information."
+              onClose={() => onOpenChange(false)}
+              primaryLabel={isPending ? 'Updating...' : 'Update Job'}
+              primaryDisabled={isPending}
+              primaryType="submit"
+              onSecondary={() => onOpenChange(false)}
+            >
+            <div
+              data-jobs-drawer-safety
+              className="relative"
+              style={{ pointerEvents: 'auto' }}
+            >
+            <div className="space-y-4 px-4 pb-4">
             {/* Note: order_ids is UI-only field for CreateJobDrawer. 
                 EditJobDrawer doesn't need to edit orders, but we keep it in form for schema compatibility.
                 The order_id from job is already set in defaultValues. */}
@@ -181,11 +206,11 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
               name="customer_name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Customer Name *</FormLabel>
+                  <FormLabel className="text-xs font-medium">Customer Name *</FormLabel>
                   <FormControl>
-                    <Input placeholder="Enter customer name" {...field} />
+                    <Input className="h-9" placeholder="Enter customer name" {...field} />
                   </FormControl>
-                  <FormMessage />
+                  <FormMessage className="text-[11px]" />
                 </FormItem>
               )}
             />
@@ -195,11 +220,11 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
               name="location_name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Location Name *</FormLabel>
+                  <FormLabel className="text-xs font-medium">Location Name *</FormLabel>
                   <FormControl>
-                    <Input placeholder="Enter cemetery/location name" {...field} />
+                    <Input className="h-9" placeholder="Enter cemetery/location name" {...field} />
                   </FormControl>
-                  <FormMessage />
+                  <FormMessage className="text-[11px]" />
                 </FormItem>
               )}
             />
@@ -209,9 +234,9 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
               name="address"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Address *</FormLabel>
+                  <FormLabel className="text-xs font-medium">Address *</FormLabel>
                   <FormControl>
-                    <Input placeholder="Enter address" {...field} />
+                    <Input className="h-9" placeholder="Enter address" {...field} />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
@@ -224,7 +249,7 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
                 name="status"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Status *</FormLabel>
+                    <FormLabel className="text-xs font-medium">Status *</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
@@ -239,7 +264,7 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
                         <SelectItem value="cancelled">Cancelled</SelectItem>
                       </SelectContent>
                     </Select>
-                    <FormMessage />
+                    <FormMessage className="text-[11px]" />
                   </FormItem>
                 )}
               />
@@ -249,10 +274,10 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
                 name="priority"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Priority *</FormLabel>
+                    <FormLabel className="text-xs font-medium">Priority *</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
-                        <SelectTrigger>
+                        <SelectTrigger className="h-9">
                           <SelectValue />
                         </SelectTrigger>
                       </FormControl>
@@ -262,7 +287,7 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
                         <SelectItem value="high">High</SelectItem>
                       </SelectContent>
                     </Select>
-                    <FormMessage />
+                    <FormMessage className="text-[11px]" />
                   </FormItem>
                 )}
               />
@@ -272,15 +297,15 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
               control={form.control}
               name="scheduled_date"
               render={({ field }) => (
-                <FormItem className="flex flex-col">
-                  <FormLabel>Scheduled Date</FormLabel>
+                <FormItem>
+                  <FormLabel className="text-xs font-medium">Scheduled Date</FormLabel>
                   <Popover>
                     <PopoverTrigger asChild>
                       <FormControl>
                         <Button
                           variant="outline"
                           className={cn(
-                            'w-full pl-3 text-left font-normal',
+                            'h-9 w-full pl-3 text-left font-normal text-xs',
                             !field.value && 'text-muted-foreground'
                           )}
                         >
@@ -318,7 +343,7 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
                       />
                     </PopoverContent>
                   </Popover>
-                  <FormMessage />
+                  <FormMessage className="text-[11px]" />
                 </FormItem>
               )}
             />
@@ -328,11 +353,11 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
               name="estimated_duration"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Estimated Duration</FormLabel>
+                  <FormLabel className="text-xs font-medium">Estimated Duration</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g., 2 hours" {...field} />
+                    <Input className="h-9" placeholder="e.g., 2 hours" {...field} />
                   </FormControl>
-                  <FormMessage />
+                  <FormMessage className="text-[11px]" />
                 </FormItem>
               )}
             />
@@ -343,9 +368,10 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
                 name="latitude"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Latitude</FormLabel>
+                    <FormLabel className="text-xs font-medium">Latitude</FormLabel>
                     <FormControl>
                       <Input
+                        className="h-9"
                         type="number"
                         step="any"
                         placeholder="e.g., 40.7128"
@@ -354,7 +380,7 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
                         value={field.value ?? ''}
                       />
                     </FormControl>
-                    <FormMessage />
+                    <FormMessage className="text-[11px]" />
                   </FormItem>
                 )}
               />
@@ -364,9 +390,10 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
                 name="longitude"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Longitude</FormLabel>
+                    <FormLabel className="text-xs font-medium">Longitude</FormLabel>
                     <FormControl>
                       <Input
+                        className="h-9"
                         type="number"
                         step="any"
                         placeholder="e.g., -74.0060"
@@ -375,7 +402,7 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
                         value={field.value ?? ''}
                       />
                     </FormControl>
-                    <FormMessage />
+                    <FormMessage className="text-[11px]" />
                   </FormItem>
                 )}
               />
@@ -386,15 +413,16 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
               name="notes"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Notes</FormLabel>
+                  <FormLabel className="text-xs font-medium">Notes</FormLabel>
                   <FormControl>
                     <Textarea
                       placeholder="Add any additional notes..."
-                      className="resize-none"
+                      className="min-h-[60px] resize-none"
+                      rows={2}
                       {...field}
                     />
                   </FormControl>
-                  <FormMessage />
+                  <FormMessage className="text-[11px]" />
                 </FormItem>
               )}
             />
@@ -443,27 +471,17 @@ export const EditJobDrawer: React.FC<EditJobDrawerProps> = ({
                 <p className="text-sm text-muted-foreground">No workers assigned</p>
               )}
             </div>
-
-            <DrawerFooter>
-              <Button type="submit" disabled={isPending}>
-                {isPending ? 'Updating...' : 'Update Job'}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-                disabled={isPending}
-              >
-                Cancel
-              </Button>
-            </DrawerFooter>
-          </form>
-        </Form>
-        <AssignWorkersDialog
-          open={assignDialogOpen}
-          onOpenChange={setAssignDialogOpen}
-          jobId={job.id}
-        />
+            </div>
+            </div>
+            </AppDrawerLayout>
+            </form>
+          </Form>
+          <AssignWorkersDialog
+            open={assignDialogOpen}
+            onOpenChange={setAssignDialogOpen}
+            jobId={job.id}
+          />
+        </div>
       </DrawerContent>
     </Drawer>
   );

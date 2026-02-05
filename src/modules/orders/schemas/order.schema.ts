@@ -46,6 +46,7 @@ export const orderFormSchema = z.object({
     .nullable(),
   value: z.number().min(0, 'Value must be positive').optional().nullable(),
   permit_cost: z.number().min(0, 'Permit cost must be positive').optional().nullable(),
+  permit_form_id: z.string().uuid().optional().nullable(),
   renovation_service_description: z.string().optional().nullable(), // Only used for Renovation order types
   renovation_service_cost: z.number().min(0, 'Service cost must be positive').optional().nullable(), // Only used for Renovation order types
   additional_options_total: z.number().min(0).optional().nullable(), // Read-only, derived from view

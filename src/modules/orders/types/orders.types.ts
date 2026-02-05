@@ -28,6 +28,7 @@ export interface Order {
   order_number: number | null;
   invoice_id: string | null;
   job_id: string | null;
+  permit_form_id: string | null;
   person_id: string | null;
   person_name: string | null;
   customer_name: string;

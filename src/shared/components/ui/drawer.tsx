@@ -3,15 +3,56 @@ import { Drawer as DrawerPrimitive } from "vaul"
 
 import { cn } from "@/shared/lib/utils"
 
+const DrawerResetKeyContext = React.createContext(0)
+
+export const useDrawerResetKey = () => React.useContext(DrawerResetKeyContext)
+
+export function useOnDrawerReset(cb: () => void) {
+  const resetKey = useDrawerResetKey()
+  const prevKeyRef = React.useRef(resetKey)
+
+  React.useEffect(() => {
+    if (prevKeyRef.current !== resetKey) {
+      prevKeyRef.current = resetKey
+      cb()
+    }
+  }, [resetKey, cb])
+}
+
 const Drawer = ({
   shouldScaleBackground = true,
+  open,
+  defaultOpen,
+  onOpenChange,
   ...props
-}: React.ComponentProps<typeof DrawerPrimitive.Root>) => (
-  <DrawerPrimitive.Root
-    shouldScaleBackground={shouldScaleBackground}
-    {...props}
-  />
-)
+}: React.ComponentProps<typeof DrawerPrimitive.Root>) => {
+  const [resetKey, setResetKey] = React.useState(0)
+  const prevOpenRef = React.useRef<boolean | undefined>(open ?? defaultOpen)
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    const wasOpen = prevOpenRef.current
+    if (wasOpen && !nextOpen) {
+      setResetKey((k) => k + 1)
+    }
+    prevOpenRef.current = nextOpen
+
+    if (onOpenChange) {
+      onOpenChange(nextOpen)
+    }
+  }
+
+  return (
+    <DrawerResetKeyContext.Provider value={resetKey}>
+      <DrawerPrimitive.Root
+        shouldScaleBackground={shouldScaleBackground}
+        open={open}
+        defaultOpen={defaultOpen}
+        onOpenChange={handleOpenChange}
+        {...props}
+      />
+    </DrawerResetKeyContext.Provider>
+  )
+}
 Drawer.displayName = "Drawer"
 
 const DrawerTrigger = DrawerPrimitive.Trigger
@@ -26,7 +67,7 @@ const DrawerOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DrawerPrimitive.Overlay
     ref={ref}
-    className={cn("fixed inset-0 z-50 bg-black/80", className)}
+    className={cn("fixed inset-0 z-40 bg-black/80", className)}
     {...props}
   />
 ))
@@ -35,35 +76,24 @@ DrawerOverlay.displayName = DrawerPrimitive.Overlay.displayName
 const DrawerContent = React.forwardRef<
   React.ElementRef<typeof DrawerPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DrawerPrimitive.Content>
->(({ className, children, open, ...props }, ref) => {
-  const [resetKey, setResetKey] = React.useState(0)
-  const prevOpenRef = React.useRef<boolean | undefined>(open)
-
-  React.useEffect(() => {
-    const wasOpen = prevOpenRef.current
-    if (wasOpen && open === false) {
-      setResetKey((k) => k + 1)
-    }
-    prevOpenRef.current = open
-  }, [open])
+>(({ className, children, ...props }, ref) => {
+  const resetKey = useDrawerResetKey()
 
   return (
     <DrawerPortal>
       <DrawerOverlay />
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6 pointer-events-none">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6">
         <DrawerPrimitive.Content
+          key={resetKey}
           ref={ref}
           className={cn(
             "relative z-50 flex w-[720px] max-w-[90vw] max-h-[90vh] flex-col min-h-0 overflow-hidden rounded-xl border bg-background shadow-lg pointer-events-auto",
             className
           )}
-          open={open}
           {...props}
         >
           <div className="mx-auto mt-4 h-2 w-[100px] shrink-0 rounded-full bg-muted" />
-          <div key={resetKey}>
-            {children}
-          </div>
+          {children}
         </DrawerPrimitive.Content>
       </div>
     </DrawerPortal>
