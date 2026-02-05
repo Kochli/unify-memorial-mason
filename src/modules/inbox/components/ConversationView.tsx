@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/shared/components/ui/avatar";
-import { Mail, Phone, MessageSquare, Send, Link2, User } from 'lucide-react';
+import { Mail, Phone, MessageSquare, Send } from 'lucide-react';
 import { Textarea } from "@/shared/components/ui/textarea";
 import { useConversation } from "@/modules/inbox/hooks/useInboxConversations";
 import { useMessagesByConversation, useSendReply } from "@/modules/inbox/hooks/useInboxMessages";
@@ -82,23 +82,15 @@ export const ConversationView: React.FC<ConversationViewProps> = ({ conversation
     ? [person.first_name, person.last_name].filter(Boolean).join(' ').trim() || person.email || person.phone || '—'
     : null;
 
-  return (
-    <div className="h-full flex flex-col">
-      {/* Link banner when unlinked or ambiguous */}
-      {isUnlinked && (
-        <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-md flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Link2 className="h-4 w-4 text-amber-600" />
-            <span className="text-sm">
-              {isAmbiguous ? 'Choose person (multiple matches)' : 'Not linked to a person'}
-            </span>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => setLinkModalOpen(true)}>
-            {isAmbiguous ? 'Choose person' : 'Link person'}
-          </Button>
-        </div>
-      )}
+  const linkStateLabel =
+    (conversation.link_state ?? 'unlinked') === 'ambiguous'
+      ? 'Ambiguous'
+      : (conversation.link_state ?? 'unlinked') === 'linked'
+        ? 'Linked'
+        : 'Not linked';
 
+  return (
+    <div className="h-full flex flex-col min-h-0">
       <LinkConversationModal
         open={linkModalOpen}
         onOpenChange={setLinkModalOpen}
@@ -109,51 +101,32 @@ export const ConversationView: React.FC<ConversationViewProps> = ({ conversation
         onUnlinked={() => setLinkModalOpen(false)}
       />
 
-      {/* Contact Details Header */}
-      <Card className="mb-4">
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <Avatar>
-                <AvatarFallback>
-                  {personDisplay
-                    ? personDisplay.substring(0, 2).toUpperCase()
-                    : conversation.primary_handle.substring(0, 2).toUpperCase()}
-                </AvatarFallback>
-              </Avatar>
-              <div>
-                <CardTitle className="text-lg">
-                  {personDisplay ?? conversation.primary_handle}
-                </CardTitle>
-                <p className="text-sm text-slate-600">
-                  {conversation.subject || (personDisplay ? conversation.primary_handle : 'No subject')}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {personDisplay && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => setLinkModalOpen(true)}
-                >
-                  <User className="h-3 w-3 mr-1" />
-                  Change link
-                </Button>
-              )}
-              {conversation.unread_count > 0 && (
-                <Badge variant="default" className="bg-blue-500">
-                  {conversation.unread_count} unread
-                </Badge>
-              )}
-              <Badge variant="outline" className="capitalize">
-                {conversation.channel}
-              </Badge>
-            </div>
+      {/* Compact sticky header: avatar + identity + status pill + action */}
+      <div className="sticky top-0 z-10 bg-background border-b shrink-0 px-3 py-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <Avatar className="h-8 w-8 shrink-0">
+            <AvatarFallback className="text-xs">
+              {personDisplay
+                ? personDisplay.substring(0, 2).toUpperCase()
+                : conversation.primary_handle.substring(0, 2).toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium truncate">
+              {personDisplay ?? conversation.primary_handle}
+            </p>
+            <p className="text-xs text-muted-foreground truncate">
+              {conversation.channel} · {conversation.primary_handle}
+            </p>
           </div>
-        </CardHeader>
-      </Card>
+          <Badge variant="outline" className="text-[11px] px-1.5 py-0 shrink-0">
+            {linkStateLabel}
+          </Badge>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => setLinkModalOpen(true)} className="shrink-0">
+          {isUnlinked ? 'Link person' : 'Change link'}
+        </Button>
+      </div>
 
       {/* Conversation Thread */}
       <Card className="flex-1 flex flex-col">
