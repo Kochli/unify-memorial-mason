@@ -35,22 +35,40 @@ DrawerOverlay.displayName = DrawerPrimitive.Overlay.displayName
 const DrawerContent = React.forwardRef<
   React.ElementRef<typeof DrawerPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DrawerPrimitive.Content>
->(({ className, children, ...props }, ref) => (
-  <DrawerPortal>
-    <DrawerOverlay />
-    <DrawerPrimitive.Content
-      ref={ref}
-      className={cn(
-        "fixed inset-x-0 bottom-0 z-50 mt-24 flex h-auto flex-col rounded-t-[10px] border bg-background",
-        className
-      )}
-      {...props}
-    >
-      <div className="mx-auto mt-4 h-2 w-[100px] rounded-full bg-muted" />
-      {children}
-    </DrawerPrimitive.Content>
-  </DrawerPortal>
-))
+>(({ className, children, open, ...props }, ref) => {
+  const [resetKey, setResetKey] = React.useState(0)
+  const prevOpenRef = React.useRef<boolean | undefined>(open)
+
+  React.useEffect(() => {
+    const wasOpen = prevOpenRef.current
+    if (wasOpen && open === false) {
+      setResetKey((k) => k + 1)
+    }
+    prevOpenRef.current = open
+  }, [open])
+
+  return (
+    <DrawerPortal>
+      <DrawerOverlay />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-6 pointer-events-none">
+        <DrawerPrimitive.Content
+          ref={ref}
+          className={cn(
+            "relative z-50 flex w-[720px] max-w-[90vw] max-h-[90vh] flex-col min-h-0 overflow-hidden rounded-xl border bg-background shadow-lg pointer-events-auto",
+            className
+          )}
+          open={open}
+          {...props}
+        >
+          <div className="mx-auto mt-4 h-2 w-[100px] shrink-0 rounded-full bg-muted" />
+          <div key={resetKey}>
+            {children}
+          </div>
+        </DrawerPrimitive.Content>
+      </div>
+    </DrawerPortal>
+  )
+})
 DrawerContent.displayName = "DrawerContent"
 
 const DrawerHeader = ({
