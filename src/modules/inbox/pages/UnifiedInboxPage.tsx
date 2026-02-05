@@ -1,15 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Card, CardContent, CardHeader } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/components/ui/tabs";
 import { Input } from "@/shared/components/ui/input";
-import { Mail, Phone, MessageSquare, Search, Archive, Eye } from 'lucide-react';
+import { Mail, Phone, MessageSquare, Search, Archive, Eye, EyeOff } from 'lucide-react';
 import { useToast } from '@/shared/hooks/use-toast';
 import { ConversationView } from "../components/ConversationView";
 import { PeopleSidebar } from "../components/PeopleSidebar";
 import { PersonOrdersPanel } from "../components/PersonOrdersPanel";
-import { useConversationsList, useConversation, useMarkAsRead, useArchiveConversations, useSyncGmail } from "@/modules/inbox/hooks/useInboxConversations";
+import { AllMessagesTimeline } from "../components/AllMessagesTimeline";
+import {
+  useConversationsList,
+  useConversation,
+  useMarkAsRead,
+  useMarkAsUnread,
+  useArchiveConversations,
+  useSyncGmail,
+} from "@/modules/inbox/hooks/useInboxConversations";
 import { formatConversationTimestamp } from "@/modules/inbox/utils/conversationUtils";
 import type { ConversationFilters } from "@/modules/inbox/types/inbox.types";
 
@@ -20,6 +28,7 @@ export const UnifiedInboxPage: React.FC = () => {
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const autoReadOnceRef = useRef<Set<string>>(new Set());
 
   const { data: selectedConversation } = useConversation(selectedConversationId);
   const activePersonId = (selectedConversation?.person_id ?? selectedPersonId ?? null) as string | null;
@@ -55,9 +64,62 @@ export const UnifiedInboxPage: React.FC = () => {
 
   const { data: conversations, isLoading, isError } = useConversationsList(filters);
   const markAsReadMutation = useMarkAsRead();
+  const markAsUnreadMutation = useMarkAsUnread();
   const archiveMutation = useArchiveConversations();
   const syncGmailMutation = useSyncGmail();
   const { toast } = useToast();
+
+  const conversationsById = useMemo(() => {
+    const map = new Map<string, (typeof conversations)[number]>();
+    conversations?.forEach((conversation) => {
+      map.set(conversation.id, conversation);
+    });
+    return map;
+  }, [conversations]);
+
+  const toggleTargetIds = useMemo(() => {
+    if (selectedItems.length > 0) {
+      return selectedItems;
+    }
+    return selectedConversationId ? [selectedConversationId] : [];
+  }, [selectedItems, selectedConversationId]);
+
+  const anyToggleTargetUnread = useMemo(() => {
+    if (!toggleTargetIds.length) return false;
+    return toggleTargetIds.some((id) => {
+      const conversation = conversationsById.get(id);
+      return conversation ? conversation.unread_count > 0 : false;
+    });
+  }, [toggleTargetIds, conversationsById]);
+
+  // Auto-mark conversation as read when opened
+  useEffect(() => {
+    if (!selectedConversationId) return;
+
+    if (markAsReadMutation.isPending) return;
+
+    const conversation = conversationsById.get(selectedConversationId);
+    if (!conversation) return;
+
+    // Only auto-mark supported channels with unread messages
+    if (
+      conversation.unread_count > 0 &&
+      (conversation.channel === "email" || conversation.channel === "sms" || conversation.channel === "whatsapp") &&
+      !autoReadOnceRef.current.has(conversation.id)
+    ) {
+      autoReadOnceRef.current.add(conversation.id);
+
+      markAsReadMutation.mutate([conversation.id], {
+        onError: () => {
+          toast({
+            title: 'Inbox update failed',
+            description: 'Could not auto-mark conversation as read. You can still toggle it manually.',
+            variant: 'destructive',
+          });
+        },
+      });
+    }
+  }, [selectedConversationId, conversationsById, markAsReadMutation, toast]);
 
   const handleSyncEmail = () => {
     syncGmailMutation.mutate(undefined, {
@@ -87,9 +149,28 @@ export const UnifiedInboxPage: React.FC = () => {
     }
   };
 
-  const handleMarkAsRead = () => {
+  const handleToggleReadUnread = () => {
+    const ids = toggleTargetIds;
+    if (ids.length === 0) return;
+
+    const isMarkingRead = anyToggleTargetUnread;
+
+    const onError = (error: unknown) => {
+      const message = error instanceof Error ? error.message : 'Failed to update read status';
+      toast({
+        title: 'Inbox update failed',
+        description: message,
+        variant: 'destructive',
+      });
+    };
+
+    if (isMarkingRead) {
+      markAsReadMutation.mutate(ids, { onError });
+    } else {
+      markAsUnreadMutation.mutate(ids, { onError });
+    }
+
     if (selectedItems.length > 0) {
-      markAsReadMutation.mutate(selectedItems);
       setSelectedItems([]);
     }
   };
@@ -135,11 +216,20 @@ export const UnifiedInboxPage: React.FC = () => {
             Archive
           </Button>
           <Button 
-            onClick={handleMarkAsRead}
-            disabled={selectedItems.length === 0}
+            onClick={handleToggleReadUnread}
+            disabled={toggleTargetIds.length === 0 || markAsReadMutation.isPending || markAsUnreadMutation.isPending}
           >
-            <Eye className="h-4 w-4 mr-2" />
-            Mark as Read
+            {anyToggleTargetUnread ? (
+              <>
+                <Eye className="h-4 w-4 mr-2" />
+                Mark as Read
+              </>
+            ) : (
+              <>
+                <EyeOff className="h-4 w-4 mr-2" />
+                Mark as Unread
+              </>
+            )}
           </Button>
         </div>
       </div>
@@ -156,130 +246,163 @@ export const UnifiedInboxPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[180px_260px_1fr] gap-4 min-h-[480px] min-w-0">
-        {/* People column: 180px, scroll contained */}
-        <div className="h-full min-h-0 flex flex-col overflow-hidden">
-          <PeopleSidebar
-            selectedPersonId={selectedPersonId}
-            onSelectPerson={setSelectedPersonId}
-          />
-        </div>
-        {/* Conversations column: 260px, scroll contained */}
-        <div className="h-full min-h-0 flex flex-col overflow-hidden">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col min-h-0">
-            <TabsList className="grid w-full grid-cols-4 gap-1 bg-muted/40 p-1 rounded-lg w-full h-auto">
-              <TabsTrigger
-                value="all"
-                className="h-8 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md"
-              >
-                All
-              </TabsTrigger>
-              <TabsTrigger
-                value="email"
-                className="h-8 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md"
-              >
-                Email
-              </TabsTrigger>
-              <TabsTrigger
-                value="sms"
-                className="h-8 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md"
-              >
-                SMS
-              </TabsTrigger>
-              <TabsTrigger
-                value="whatsapp"
-                className="h-8 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md"
-              >
-                WhatsApp
-              </TabsTrigger>
-            </TabsList>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-2">
+        <TabsList className="grid w-full grid-cols-4 gap-1 bg-muted/40 p-1 rounded-lg w-full max-w-md h-auto">
+          <TabsTrigger
+            value="all"
+            className="h-8 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md"
+          >
+            All
+          </TabsTrigger>
+          <TabsTrigger
+            value="email"
+            className="h-8 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md"
+          >
+            Email
+          </TabsTrigger>
+          <TabsTrigger
+            value="sms"
+            className="h-8 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md"
+          >
+            SMS
+          </TabsTrigger>
+          <TabsTrigger
+            value="whatsapp"
+            className="h-8 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md"
+          >
+            WhatsApp
+          </TabsTrigger>
+        </TabsList>
 
-            <TabsContent value={activeTab} className="flex-1 min-h-0 overflow-auto space-y-2 mt-2">
-              {isLoading ? (
-                <Card className="p-8 text-center">
-                  <div className="text-slate-400">
-                    <Mail className="h-12 w-12 mx-auto mb-4" />
-                    <p>Loading conversations...</p>
-                  </div>
-                </Card>
-              ) : isError ? (
-                <Card className="p-8 text-center">
-                  <div className="text-slate-400">
-                    <Mail className="h-12 w-12 mx-auto mb-4" />
-                    <p>Unable to load conversations</p>
-                  </div>
-                </Card>
-              ) : !conversations || conversations.length === 0 ? (
-                <Card className="p-8 text-center">
-                  <div className="text-slate-400">
-                    <Mail className="h-12 w-12 mx-auto mb-4" />
-                    <p>No conversations found</p>
-                  </div>
-                </Card>
-              ) : (
-                conversations.map((conversation) => (
-                  <Card
-                    key={conversation.id}
-                    className={`cursor-pointer transition-all rounded-md border-b last:border-b-0 hover:bg-muted/30 ${
-                      selectedConversationId === conversation.id
-                        ? 'bg-muted/50 ring-1 ring-primary/30 border-l-2 border-l-primary'
-                        : ''
-                    }`}
-                    onClick={() => setSelectedConversationId(conversation.id)}
-                  >
-                    <CardHeader className="p-2">
-                      <div className="flex items-center justify-between gap-1.5">
-                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                          <input
-                            type="checkbox"
-                            checked={selectedItems.includes(conversation.id)}
-                            onChange={() => toggleSelection(conversation.id)}
-                            className="rounded shrink-0"
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                          {getIcon(conversation.channel)}
-                          <div className="min-w-0 flex-1">
-                            <div className="text-xs font-medium truncate">{conversation.primary_handle}</div>
-                            <div className="text-[11px] text-muted-foreground truncate leading-tight">
-                              {conversation.subject || conversation.last_message_preview || ''}
+        {(() => {
+          const showUnifiedTimeline = activeTab === 'all' && selectedPersonId != null;
+          return (
+        <div
+          className={`grid gap-4 min-h-[480px] min-w-0 grid-cols-1 ${
+            showUnifiedTimeline ? 'lg:grid-cols-[180px_1fr]' : 'lg:grid-cols-[180px_260px_1fr]'
+          }`}
+        >
+          {/* People column: always visible */}
+          <div className="h-full min-h-0 flex flex-col overflow-hidden">
+            <PeopleSidebar
+              selectedPersonId={selectedPersonId}
+              onSelectPerson={setSelectedPersonId}
+            />
+          </div>
+
+          {showUnifiedTimeline ? (
+            /* All tab + linked person: 2 columns — People + unified timeline in Conversation card */
+            <div className="min-h-0 min-w-0 flex flex-col gap-4 flex-1">
+              <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
+                <AllMessagesTimeline
+                  personId={selectedPersonId}
+                  onOpenThread={({ channel, conversationId }) => {
+                    setActiveTab(channel);
+                    setSelectedConversationId(conversationId);
+                  }}
+                />
+              </div>
+              <PersonOrdersPanel
+                personId={activePersonId}
+                selectedOrderId={selectedOrderId}
+                onSelectOrder={setSelectedOrderId}
+                onCloseOrder={() => setSelectedOrderId(null)}
+              />
+            </div>
+          ) : (
+            <>
+              {/* Conversations column: only for Email/SMS/WhatsApp */}
+              <div className="h-full min-h-0 flex flex-col overflow-hidden">
+                <div className="flex-1 min-h-0 overflow-auto space-y-2">
+                  {isLoading ? (
+                    <Card className="p-8 text-center">
+                      <div className="text-slate-400">
+                        <Mail className="h-12 w-12 mx-auto mb-4" />
+                        <p>Loading conversations...</p>
+                      </div>
+                    </Card>
+                  ) : isError ? (
+                    <Card className="p-8 text-center">
+                      <div className="text-slate-400">
+                        <Mail className="h-12 w-12 mx-auto mb-4" />
+                        <p>Unable to load conversations</p>
+                      </div>
+                    </Card>
+                  ) : !conversations || conversations.length === 0 ? (
+                    <Card className="p-8 text-center">
+                      <div className="text-slate-400">
+                        <Mail className="h-12 w-12 mx-auto mb-4" />
+                        <p>No conversations found</p>
+                      </div>
+                    </Card>
+                  ) : (
+                    conversations.map((conversation) => (
+                      <Card
+                        key={conversation.id}
+                        className={`cursor-pointer transition-all rounded-md border-b last:border-b-0 hover:bg-muted/30 ${
+                          selectedConversationId === conversation.id
+                            ? 'bg-muted/50 ring-1 ring-primary/30 border-l-2 border-l-primary'
+                            : ''
+                        }`}
+                        onClick={() => setSelectedConversationId(conversation.id)}
+                      >
+                        <CardHeader className="p-2">
+                          <div className="flex items-center justify-between gap-1.5">
+                            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                              <input
+                                type="checkbox"
+                                checked={selectedItems.includes(conversation.id)}
+                                onChange={() => toggleSelection(conversation.id)}
+                                className="rounded shrink-0"
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                              {getIcon(conversation.channel)}
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-medium truncate">{conversation.primary_handle}</div>
+                                <div className="text-[11px] text-muted-foreground truncate leading-tight">
+                                  {conversation.subject || conversation.last_message_preview || ''}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-[10px] text-muted-foreground shrink-0">
+                              {formatConversationTimestamp(conversation.last_message_at)}
                             </div>
                           </div>
-                        </div>
-                        <div className="text-[10px] text-muted-foreground shrink-0">
-                          {formatConversationTimestamp(conversation.last_message_at)}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 ml-6 mt-0.5">
-                        {conversation.unread_count > 0 && (
-                          <Badge variant="default" className="bg-blue-500 text-[10px] px-1.5 py-0.5 rounded-sm">
-                            {conversation.unread_count} unread
-                          </Badge>
-                        )}
-                        <Badge variant="outline" className="capitalize text-[10px] px-1.5 py-0.5 rounded-sm">
-                          {conversation.channel}
-                        </Badge>
-                      </div>
-                    </CardHeader>
-                  </Card>
-                ))
-              )}
-            </TabsContent>
-          </Tabs>
-        </div>
+                          <div className="flex items-center gap-1.5 ml-6 mt-0.5">
+                            {conversation.unread_count > 0 && (
+                              <Badge variant="default" className="bg-blue-500 text-[10px] px-1.5 py-0.5 rounded-sm">
+                                {conversation.unread_count} unread
+                              </Badge>
+                            )}
+                            <Badge variant="outline" className="capitalize text-[10px] px-1.5 py-0.5 rounded-sm">
+                              {conversation.channel}
+                            </Badge>
+                          </div>
+                        </CardHeader>
+                      </Card>
+                    ))
+                  )}
+                </div>
+              </div>
 
-        {/* Conversation panel column: 1fr, message list scrolls inside ConversationView */}
-        <div className="min-h-0 min-w-0 flex flex-col gap-4">
-          <div className="flex-1 min-h-[200px] min-w-0 flex flex-col overflow-hidden">
-            <ConversationView conversationId={selectedConversationId} />
-          </div>
-          <PersonOrdersPanel
-            personId={activePersonId}
-            selectedOrderId={selectedOrderId}
-            onSelectOrder={setSelectedOrderId}
-            onCloseOrder={() => setSelectedOrderId(null)}
-          />
+              {/* Conversation panel column: 1fr, message list scrolls inside ConversationView */}
+              <div className="min-h-0 min-w-0 flex flex-col gap-4">
+                <div className="flex-1 min-h-[200px] min-w-0 flex flex-col overflow-hidden">
+                  <ConversationView conversationId={selectedConversationId} />
+                </div>
+                <PersonOrdersPanel
+                  personId={activePersonId}
+                  selectedOrderId={selectedOrderId}
+                  onSelectOrder={setSelectedOrderId}
+                  onCloseOrder={() => setSelectedOrderId(null)}
+                />
+              </div>
+            </>
+          )}
         </div>
-      </div>
+          );
+        })()}
+      </Tabs>
     </div>
   );
 };

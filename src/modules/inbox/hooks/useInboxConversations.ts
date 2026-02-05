@@ -4,6 +4,7 @@ import {
   fetchConversation,
   updateConversation,
   markConversationsAsRead,
+  markConversationsAsUnread,
   archiveConversations,
   linkConversation,
   unlinkConversation,
@@ -19,6 +20,8 @@ export const inboxKeys = {
   },
   messages: {
     byConversation: (id: string) => ['inbox', 'messages', 'conversation', id] as const,
+    personTimeline: (personId: string, conversationIds: string[]) =>
+      ['inbox', 'messages', 'personTimeline', personId, conversationIds] as const,
   },
   channels: {
     all: ['inbox', 'channels'] as const,
@@ -45,8 +48,74 @@ export function useMarkAsRead() {
 
   return useMutation({
     mutationFn: (ids: string[]) => markConversationsAsRead(ids),
-    onSuccess: () => {
-      // Invalidate all conversation list queries
+    retry: 0,
+    onMutate: async (ids: string[]) => {
+      // Optimistically set unread_count = 0 for targeted conversations
+      const previous = queryClient.getQueriesData<unknown>({ queryKey: inboxKeys.conversations.all });
+
+      previous.forEach(([key, value]) => {
+        const conversations = value as InboxConversation[] | undefined;
+        if (!conversations) return;
+
+        const updated = conversations.map((conversation) =>
+          ids.includes(conversation.id)
+            ? { ...conversation, unread_count: 0 }
+            : conversation
+        );
+
+        queryClient.setQueryData(key, updated);
+      });
+
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      // Roll back optimistic update if something goes wrong
+      if (!context?.previous) return;
+      context.previous.forEach(([key, value]: [unknown, unknown]) => {
+        queryClient.setQueryData(key, value);
+      });
+    },
+    onSettled: () => {
+      // Invalidate all conversation list queries to resync with server
+      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+    },
+  });
+}
+
+export function useMarkAsUnread() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (ids: string[]) => markConversationsAsUnread(ids),
+    retry: 0,
+    onMutate: async (ids: string[]) => {
+      // Optimistically set unread_count = 1 for targeted conversations
+      const previous = queryClient.getQueriesData<unknown>({ queryKey: inboxKeys.conversations.all });
+
+      previous.forEach(([key, value]) => {
+        const conversations = value as InboxConversation[] | undefined;
+        if (!conversations) return;
+
+        const updated = conversations.map((conversation) =>
+          ids.includes(conversation.id)
+            ? { ...conversation, unread_count: 1 }
+            : conversation
+        );
+
+        queryClient.setQueryData(key, updated);
+      });
+
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      // Roll back optimistic update if something goes wrong
+      if (!context?.previous) return;
+      context.previous.forEach(([key, value]: [unknown, unknown]) => {
+        queryClient.setQueryData(key, value);
+      });
+    },
+    onSettled: () => {
+      // Invalidate all conversation list queries to resync with server
       queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
     },
   });
