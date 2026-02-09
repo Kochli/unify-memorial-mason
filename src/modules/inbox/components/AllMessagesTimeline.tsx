@@ -1,9 +1,11 @@
-import React, { useRef } from 'react';
+import React, { useRef, useMemo, useState, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card';
 import { usePersonUnifiedTimeline } from '../hooks/useInboxMessages';
 import { useCustomer } from '@/modules/customers/hooks/useCustomers';
 import { ConversationHeader } from './ConversationHeader';
-import { ConversationThread } from './ConversationThread';
+import { ConversationThread, type ReplyToInfo } from './ConversationThread';
+import type { InboxMessage } from '../types/inbox.types';
 
 interface AllMessagesTimelineProps {
   personId: string | null;
@@ -22,6 +24,41 @@ export const AllMessagesTimeline: React.FC<AllMessagesTimelineProps> = ({ person
   const showConversationWindow = !!personId && !isError;
   const hasMessages = !!messages && messages.length > 0;
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const queryClient = useQueryClient();
+  const [replyTo, setReplyTo] = useState<ReplyToInfo | null>(null);
+
+  useEffect(() => {
+    setReplyTo(null);
+  }, [personId]);
+
+  const handleReplyToMessage = React.useCallback((info: { messageId: string; channel: 'email' | 'sms' | 'whatsapp'; preview?: string }) => {
+    setReplyTo({ messageId: info.messageId, channel: info.channel, preview: info.preview ?? '' });
+  }, []);
+
+  const { conversationIdByChannel, defaultChannel } = useMemo(() => {
+    const map: Record<'email' | 'sms' | 'whatsapp', string | null> = {
+      email: null,
+      sms: null,
+      whatsapp: null,
+    };
+    let lastInboundChannel: 'email' | 'sms' | 'whatsapp' | null = null;
+    (messages ?? []).forEach((msg: InboxMessage) => {
+      map[msg.channel] = msg.conversation_id;
+      if (msg.direction === 'inbound') lastInboundChannel = msg.channel;
+    });
+    return {
+      conversationIdByChannel: map,
+      defaultChannel: lastInboundChannel ?? 'email',
+    };
+  }, [messages]);
+
+  const handleSendSuccess = React.useCallback(() => {
+    if (personId) {
+      queryClient.invalidateQueries({
+        queryKey: ['inbox', 'messages', 'personTimeline', personId],
+      });
+    }
+  }, [personId, queryClient]);
 
   if (!personId) {
     return (
@@ -63,8 +100,14 @@ export const AllMessagesTimeline: React.FC<AllMessagesTimelineProps> = ({ person
       ) : hasMessages ? (
         <ConversationThread
           messages={messages}
-          readOnly={true}
+          readOnly={false}
           onMessageClick={(msg) => onOpenThread({ channel: msg.channel, conversationId: msg.conversation_id })}
+          conversationIdByChannel={conversationIdByChannel}
+          defaultChannel={defaultChannel}
+          replyTo={replyTo}
+          onReplyToClear={() => setReplyTo(null)}
+          onReplyToMessage={handleReplyToMessage}
+          onSendSuccess={handleSendSuccess}
           scrollContainerRef={scrollContainerRef}
         />
       ) : (

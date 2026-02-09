@@ -29,7 +29,7 @@ export const PersonOrdersPanel: React.FC<PersonOrdersPanelProps> = ({
   if (!personId) {
     return (
       <Card>
-        <CardContent className="py-6">
+        <CardContent className="py-4">
           <div className="text-center text-slate-500 text-sm">
             Select a person to view orders
           </div>
@@ -44,25 +44,25 @@ export const PersonOrdersPanel: React.FC<PersonOrdersPanelProps> = ({
 
   return (
     <Card>
-      <CardHeader className="pb-2">
+      <CardHeader className="pb-1.5 pt-2 px-3">
         <CardTitle className="text-base flex items-center gap-2">
           <Package className="h-4 w-4" />
           Orders {orders.length > 0 && `(${orders.length})`}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-3 px-3 pb-3 pt-2">
         {isLoading ? (
-          <div className="space-y-2">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
+          <div className="space-y-1.5">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
           </div>
         ) : error ? (
           <div className="text-sm text-red-600">
             {error instanceof Error ? error.message : 'Failed to load orders'}
           </div>
         ) : orders.length === 0 ? (
-          <div className="text-center text-slate-500 text-sm py-4">
+          <div className="text-center text-slate-500 text-sm py-3">
             No orders for this person yet
           </div>
         ) : (
@@ -72,11 +72,11 @@ export const PersonOrdersPanel: React.FC<PersonOrdersPanelProps> = ({
                 key={order.id}
                 type="button"
                 onClick={() => onSelectOrder(order.id)}
-                className={`w-full text-left px-3 py-2 rounded-md hover:bg-slate-100 transition-colors ${
+                className={`w-full text-left px-2.5 py-1.5 rounded-md hover:bg-slate-100 transition-colors ${
                   selectedOrderId === order.id ? 'bg-slate-100 ring-1 ring-slate-300' : ''
                 }`}
               >
-                <div className="flex justify-between items-center">
+                <div className="flex justify-between items-center gap-2">
                   <span className="font-medium text-sm">
                     {getOrderDisplayId(order)}
                   </span>
@@ -84,7 +84,7 @@ export const PersonOrdersPanel: React.FC<PersonOrdersPanelProps> = ({
                     {getOrderTotalFormatted(order)}
                   </span>
                 </div>
-                <div className="flex gap-2 mt-0.5">
+                <div className="flex gap-1.5 mt-0.5">
                   <span className="text-xs text-slate-500">
                     {order.order_type}
                   </span>
@@ -100,7 +100,7 @@ export const PersonOrdersPanel: React.FC<PersonOrdersPanelProps> = ({
         )}
 
         {selectedOrderId && selectedOrder && (
-          <div className="mt-4 border-t pt-4 max-h-[400px] overflow-y-auto">
+          <div className="mt-3 border-t pt-3 max-h-[400px] overflow-y-auto">
             <OrderDetailsSidebar
               order={selectedOrder}
               onClose={onCloseOrder}
