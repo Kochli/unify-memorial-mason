@@ -20,6 +20,10 @@ export interface Invoice {
   stripe_status?: 'unpaid' | 'pending' | 'paid' | null;
   /** When Stripe payment completed (webhook) */
   paid_at?: string | null;
+  /** Stripe Invoice object ID (Stripe Invoicing API flow) */
+  stripe_invoice_id?: string | null;
+  /** Stripe Invoice status mirror (open, paid, payment_failed, etc.) */
+  stripe_invoice_status?: string | null;
 }
 
 export type InvoiceInsert = Omit<Invoice, 'id' | 'created_at' | 'updated_at'>;

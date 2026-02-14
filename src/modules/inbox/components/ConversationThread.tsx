@@ -13,6 +13,7 @@ import { Reply, Send, X } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { formatMessageTimestamp } from '@/modules/inbox/utils/conversationUtils';
 import { useSendReply } from '@/modules/inbox/hooks/useInboxMessages';
+import { useSuggestedReply } from '@/modules/inbox/hooks/useSuggestedReply';
 import type { InboxMessage } from '@/modules/inbox/types/inbox.types';
 
 const CHANNEL_LABELS: Record<'email' | 'sms' | 'whatsapp', string> = {
@@ -128,6 +129,55 @@ function buildMetaLine(message: InboxMessage): string | null {
   return subject ?? fromTo;
 }
 
+const SUGGEST_CHIP_MAX_LEN = 50;
+
+function SuggestedReplyChip({
+  suggestion,
+  isLoading,
+  error,
+  onUseSuggestion,
+}: {
+  suggestion: string | null;
+  isLoading: boolean;
+  error: Error | null;
+  onUseSuggestion: (text: string) => void;
+}) {
+  if (isLoading) {
+    return (
+      <div className="mb-3 min-h-[28px] flex items-center">
+        <span className="text-xs text-muted-foreground">Suggesting reply…</span>
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="mb-3 min-h-[28px] flex items-center">
+        <span className="text-xs text-muted-foreground">Couldn&apos;t load suggestion</span>
+      </div>
+    );
+  }
+  if (!suggestion) return <div className="mb-3 min-h-[28px]" />;
+
+  const label =
+    suggestion.length > SUGGEST_CHIP_MAX_LEN
+      ? `${suggestion.slice(0, SUGGEST_CHIP_MAX_LEN)}…`
+      : suggestion;
+  return (
+    <div className="mb-3 flex items-center flex-wrap gap-1">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="text-xs h-7 max-w-full truncate"
+        title={suggestion}
+        onClick={() => onUseSuggestion(suggestion)}
+      >
+        {label}
+      </Button>
+    </div>
+  );
+}
+
 export const ConversationThread: React.FC<ConversationThreadProps> = ({
   messages,
   readOnly = false,
@@ -200,6 +250,12 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
       (ch) => conversationIdByChannel[ch] != null
     );
   }, [conversationIdByChannel]);
+
+  const lastInboundMessage = useMemo(
+    () => messages.slice().reverse().find((m) => m.direction === 'inbound') ?? null,
+    [messages]
+  );
+  const suggestedReply = useSuggestedReply(lastInboundMessage?.id ?? null);
 
   const toggleRawHtml = (messageId: string) => {
     setRawHtmlMessageIds((prev) => {
@@ -392,6 +448,12 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
                 </Select>
               </div>
             )}
+            <SuggestedReplyChip
+              suggestion={suggestedReply.suggestion}
+              isLoading={suggestedReply.isLoading}
+              error={suggestedReply.error}
+              onUseSuggestion={setReplyText}
+            />
             <Textarea
               ref={textareaRef}
               placeholder="Type your reply..."

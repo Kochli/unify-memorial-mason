@@ -5,24 +5,33 @@ import { Badge } from '@/shared/components/ui/badge';
 import { ChevronRight, ChevronDown, Loader2 } from 'lucide-react';
 import { CustomerDetailsPopover } from '@/shared/components/customer/CustomerDetailsPopover';
 import { useToast } from '@/shared/hooks/use-toast';
-import { createCheckoutSession } from '../api/stripe.api';
+import { createStripeInvoice } from '../api/stripe.api';
 import type { UIInvoice } from '../utils/invoiceTransform';
 
 function StripePaymentLinkCell({ invoice }: { invoice: UIInvoice }) {
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
-  const isPaid = invoice.status === 'paid' || invoice.stripeStatus === 'paid';
+  const isPaid = invoice.status === 'paid' || invoice.stripeStatus === 'paid' || invoice.stripeInvoiceStatus === 'paid';
 
-  const handleOpen = async () => {
+  const handleOpenLink = async () => {
     if (isPaid) return;
     setLoading(true);
     try {
-      const { url } = await createCheckoutSession(invoice.id);
-      window.open(url, '_blank', 'noopener,noreferrer');
+      const data = await createStripeInvoice(invoice.id);
+      const url = data.hosted_invoice_url;
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      } else {
+        toast({
+          variant: 'destructive',
+          title: 'Payment link unavailable',
+          description: 'Hosted invoice URL was not returned. Please try again or open the invoice from the sidebar.',
+        });
+      }
     } catch (e) {
       toast({
         variant: 'destructive',
-        title: 'Could not create payment link',
+        title: 'Could not create invoice link',
         description: e instanceof Error ? e.message : 'Something went wrong.',
       });
     } finally {
@@ -31,8 +40,9 @@ function StripePaymentLinkCell({ invoice }: { invoice: UIInvoice }) {
   };
 
   if (isPaid) {
-    return <span className="text-sm text-muted-foreground">—</span>;
+    return <span className="text-sm text-green-600 font-medium">Paid</span>;
   }
+
   return (
     <Button
       variant="outline"
@@ -41,16 +51,16 @@ function StripePaymentLinkCell({ invoice }: { invoice: UIInvoice }) {
       disabled={loading}
       onClick={(e) => {
         e.stopPropagation();
-        handleOpen();
+        handleOpenLink();
       }}
     >
       {loading ? (
         <>
           <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-          Opening…
+          …
         </>
       ) : (
-        'Open'
+        'Link'
       )}
     </Button>
   );

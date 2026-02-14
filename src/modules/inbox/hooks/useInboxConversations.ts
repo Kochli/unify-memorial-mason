@@ -173,6 +173,8 @@ export function useSyncGmail() {
     onSuccess: () => {
       // Invalidate all conversation list queries to show new emails
       queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+      // Invalidate message queries so the open conversation thread refetches
+      queryClient.invalidateQueries({ queryKey: ['inbox', 'messages'] });
     },
   });
 }

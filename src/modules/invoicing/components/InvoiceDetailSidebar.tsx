@@ -2,14 +2,17 @@ import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
-import { X, Calendar, Plus, Copy } from 'lucide-react';
+import { X, Calendar, Plus, Copy, CreditCard } from 'lucide-react';
 import { useOrdersByInvoice } from '@/modules/orders/hooks/useOrders';
 import { CreateOrderDrawer } from '@/modules/orders/components/CreateOrderDrawer';
 import { CustomerDetailsPopover } from '@/shared/components/customer/CustomerDetailsPopover';
 import { useToast } from '@/shared/hooks/use-toast';
+import { useQueryClient } from '@tanstack/react-query';
 import type { Invoice } from '../types/invoicing.types';
 import { getOrderTotalFormatted } from '@/modules/orders/utils/orderCalculations';
-import { createCheckoutSession } from '../api/stripe.api';
+import { createCheckoutSession, createStripeInvoice } from '../api/stripe.api';
+import { invoicesKeys } from '../hooks/useInvoices';
+import { StripePaymentForm } from '@/modules/payments/components/StripePaymentForm';
 
 interface InvoiceDetailSidebarProps {
   invoice: Invoice | null;
@@ -20,6 +23,8 @@ function getStripePillClass(stripeStatus: string | null | undefined): string {
   switch (stripeStatus) {
     case 'paid': return 'bg-green-100 text-green-700';
     case 'pending': return 'bg-amber-100 text-amber-700';
+    case 'open': return 'bg-blue-100 text-blue-700';
+    case 'payment_failed': return 'bg-red-100 text-red-700';
     case 'unpaid':
     default: return 'bg-slate-100 text-slate-600';
   }
@@ -28,13 +33,16 @@ function getStripePillClass(stripeStatus: string | null | undefined): string {
 export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({ invoice, onClose }) => {
   const [createOrderDrawerOpen, setCreateOrderDrawerOpen] = useState(false);
   const [copyLoading, setCopyLoading] = useState(false);
+  const [payLoading, setPayLoading] = useState(false);
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { data: orders, isLoading: isOrdersLoading } = useOrdersByInvoice(invoice?.id ?? null);
 
   if (!invoice) return null;
 
-  const isPaid = invoice.status === 'paid' || invoice.stripe_status === 'paid';
-  const stripeStatus = invoice.stripe_status ?? 'unpaid';
+  const isPaid = invoice.status === 'paid' || invoice.stripe_status === 'paid' || invoice.stripe_invoice_status === 'paid';
+  const stripeStatus = invoice.stripe_invoice_status ?? invoice.stripe_status ?? 'unpaid';
 
   const handleCopyPaymentLink = async () => {
     if (isPaid) return;
@@ -55,6 +63,47 @@ export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({ invo
     } finally {
       setCopyLoading(false);
     }
+  };
+
+  const handlePayWithStripe = async () => {
+    if (isPaid) return;
+    setPayLoading(true);
+    try {
+      const data = await createStripeInvoice(invoice.id);
+      if (data.client_secret) {
+        setClientSecret(data.client_secret);
+      } else {
+        toast({
+          variant: 'destructive',
+          title: 'Payment form unavailable',
+          description: 'Open the invoice link to pay on Stripe’s hosted page.',
+        });
+      }
+    } catch (e) {
+      toast({
+        variant: 'destructive',
+        title: 'Could not create Stripe invoice',
+        description: e instanceof Error ? e.message : 'Something went wrong.',
+      });
+    } finally {
+      setPayLoading(false);
+    }
+  };
+
+  const handlePaymentSuccess = () => {
+    setClientSecret(null);
+    toast({
+      title: 'Payment successful',
+      description: 'The invoice will be marked as paid shortly.',
+    });
+    queryClient.invalidateQueries({ queryKey: invoicesKeys.all });
+    if (invoice.id) {
+      queryClient.invalidateQueries({ queryKey: invoicesKeys.detail(invoice.id) });
+    }
+  };
+
+  const handlePaymentCancel = () => {
+    setClientSecret(null);
   };
 
   const getStatusColor = (status: string) => {
@@ -93,6 +142,22 @@ export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({ invo
           </Button>
         </div>
 
+        {/* Stripe Payment Form (inline) */}
+        {clientSecret && (
+          <Card className="mb-4">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Pay Invoice</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <StripePaymentForm
+                clientSecret={clientSecret}
+                onSuccess={handlePaymentSuccess}
+                onCancel={handlePaymentCancel}
+              />
+            </CardContent>
+          </Card>
+        )}
+
         {/* Invoice Information */}
         <Card className="mb-4">
           <CardHeader className="pb-3">
@@ -110,8 +175,18 @@ export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({ invo
                 </Badge>
               </div>
             </div>
-            {!isPaid && (
-              <div className="pt-1">
+            {!isPaid && !clientSecret && (
+              <div className="pt-1 space-y-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  className="w-full"
+                  disabled={payLoading}
+                  onClick={handlePayWithStripe}
+                >
+                  <CreditCard className="h-4 w-4 mr-2" />
+                  {payLoading ? 'Creating…' : 'Pay with Stripe'}
+                </Button>
                 <Button
                   type="button"
                   variant="outline"
@@ -250,4 +325,3 @@ export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({ invo
     </div>
   );
 };
-

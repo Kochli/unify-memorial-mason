@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
@@ -7,11 +8,13 @@ import { Input } from "@/shared/components/ui/input";
 import { ChevronLeft, ChevronRight, Mail, Phone, MessageSquare, Search, Archive, Eye, EyeOff } from 'lucide-react';
 import { cn } from "@/shared/lib/utils";
 import { useToast } from '@/shared/hooks/use-toast';
+import { supabase } from '@/shared/lib/supabase';
 import { ConversationView } from "../components/ConversationView";
 import { PeopleSidebar } from "../components/PeopleSidebar";
 import { PersonOrdersPanel } from "../components/PersonOrdersPanel";
 import { AllMessagesTimeline } from "../components/AllMessagesTimeline";
 import {
+  inboxKeys,
   useConversationsList,
   useConversation,
   useMarkAsRead,
@@ -22,6 +25,9 @@ import {
 import { formatConversationTimestamp } from "@/modules/inbox/utils/conversationUtils";
 import type { ConversationFilters } from "@/modules/inbox/types/inbox.types";
 
+const REALTIME_DEBOUNCE_MS = 200;
+const GMAIL_POLL_INTERVAL_MS = 60_000;
+
 export const UnifiedInboxPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -31,6 +37,8 @@ export const UnifiedInboxPage: React.FC = () => {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const autoReadOnceRef = useRef<Set<string>>(new Set());
+  const realtimePendingIdsRef = useRef<Set<string>>(new Set());
+  const realtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { data: selectedConversation } = useConversation(selectedConversationId);
   const activePersonId = (selectedConversation?.person_id ?? selectedPersonId ?? null) as string | null;
@@ -64,12 +72,16 @@ export const UnifiedInboxPage: React.FC = () => {
     return base;
   }, [activeTab, searchQuery, selectedPersonId]);
 
+  const queryClient = useQueryClient();
   const { data: conversations, isLoading, isError } = useConversationsList(filters);
   const markAsReadMutation = useMarkAsRead();
   const markAsUnreadMutation = useMarkAsUnread();
   const archiveMutation = useArchiveConversations();
   const syncGmailMutation = useSyncGmail();
   const { toast } = useToast();
+  const gmailPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const syncGmailMutationRef = useRef(syncGmailMutation);
+  syncGmailMutationRef.current = syncGmailMutation;
 
   const conversationsById = useMemo(() => {
     const map = new Map<string, (typeof conversations)[number]>();
@@ -123,24 +135,67 @@ export const UnifiedInboxPage: React.FC = () => {
     }
   }, [selectedConversationId, conversationsById, markAsReadMutation, toast]);
 
-  const handleSyncEmail = () => {
-    syncGmailMutation.mutate(undefined, {
-      onSuccess: (data) => {
-        toast({
-          title: 'Email sync completed',
-          description: `Synced ${data.syncedCount} messages, skipped ${data.skippedCount}, ${data.errorsCount} errors`,
-        });
-      },
-      onError: (error) => {
-        const message = error instanceof Error ? error.message : 'Failed to sync email';
-        toast({
-          title: 'Email sync failed',
-          description: message,
-          variant: 'destructive',
-        });
-      },
-    });
-  };
+  // Realtime: subscribe once to inbox_messages INSERT; debounced invalidation only (no cache patch).
+  // Existing inbox queries do not filter by company_id/org_id; RLS applies to Realtime payloads.
+  useEffect(() => {
+    const channel = supabase.channel('inbox-messages');
+    const flush = () => {
+      realtimeDebounceRef.current = null;
+      const ids = Array.from(realtimePendingIdsRef.current);
+      realtimePendingIdsRef.current.clear();
+      if (ids.length === 0) return;
+      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+      ids.forEach((conversationId) => {
+        queryClient.invalidateQueries({ queryKey: inboxKeys.messages.byConversation(conversationId) });
+      });
+    };
+    const scheduleFlush = () => {
+      if (realtimeDebounceRef.current) return;
+      realtimeDebounceRef.current = setTimeout(flush, REALTIME_DEBOUNCE_MS);
+    };
+    channel
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'inbox_messages',
+        },
+        (payload: { new?: { conversation_id?: string } }) => {
+          const conversationId = payload.new?.conversation_id;
+          if (conversationId) {
+            realtimePendingIdsRef.current.add(conversationId);
+            scheduleFlush();
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      if (realtimeDebounceRef.current) {
+        clearTimeout(realtimeDebounceRef.current);
+        realtimeDebounceRef.current = null;
+      }
+      realtimePendingIdsRef.current.clear();
+      void supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
+
+  // Gmail auto-sync: poll every 60s while page is mounted; guard so we don't overlap.
+  useEffect(() => {
+    const tick = () => {
+      const mutation = syncGmailMutationRef.current;
+      if (mutation.isPending) return;
+      mutation.mutate(undefined);
+    };
+    gmailPollIntervalRef.current = setInterval(tick, GMAIL_POLL_INTERVAL_MS);
+    return () => {
+      if (gmailPollIntervalRef.current) {
+        clearInterval(gmailPollIntervalRef.current);
+        gmailPollIntervalRef.current = null;
+      }
+    };
+  }, []);
 
   const getIcon = (channel: string) => {
     switch (channel) {
@@ -200,14 +255,6 @@ export const UnifiedInboxPage: React.FC = () => {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={handleSyncEmail}
-            disabled={syncGmailMutation.isPending}
-          >
-            {syncGmailMutation.isPending ? 'Syncing…' : 'Sync Email'}
-          </Button>
           <Button 
             variant="outline" 
             size="sm"
