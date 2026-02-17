@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card';
 import { Skeleton } from '@/shared/components/ui/skeleton';
 import { Package } from 'lucide-react';
@@ -25,6 +25,20 @@ export const PersonOrdersPanel: React.FC<PersonOrdersPanelProps> = ({
   const queryClient = useQueryClient();
   const { data: orders = [], isLoading, error } = useOrdersByPersonId(personId);
   const { data: selectedOrder } = useOrder(selectedOrderId ?? '');
+  const autoSelectedPersonRef = useRef<string | null>(null);
+
+  // Auto-select the first order when orders load for a new person
+  useEffect(() => {
+    if (
+      !isLoading &&
+      orders.length > 0 &&
+      personId &&
+      autoSelectedPersonRef.current !== personId
+    ) {
+      autoSelectedPersonRef.current = personId;
+      onSelectOrder(orders[0].id);
+    }
+  }, [isLoading, orders, personId, onSelectOrder]);
 
   if (!personId) {
     return (

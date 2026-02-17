@@ -157,12 +157,12 @@ export const WorkersPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
         <div>
-          <h1 className="text-3xl font-bold">Workers</h1>
+          <h1 className="text-xl sm:text-3xl font-bold">Workers</h1>
           <p className="text-slate-600 mt-1">Manage your team members and their assignments</p>
         </div>
-        <Button onClick={() => setCreateDrawerOpen(true)}>
+        <Button onClick={() => setCreateDrawerOpen(true)} className="w-full sm:w-auto">
           <Plus className="h-4 w-4 mr-2" />
           New Worker
         </Button>

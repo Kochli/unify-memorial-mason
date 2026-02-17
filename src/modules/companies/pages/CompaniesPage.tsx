@@ -111,7 +111,7 @@ export const CompaniesPage: React.FC = () => {
         <CardHeader>
           <CardTitle>Companies ({filteredCompanies.length})</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -170,21 +170,21 @@ export const CompaniesPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
         <div>
-          <h1 className="text-2xl font-bold">Companies</h1>
+          <h1 className="text-xl sm:text-2xl font-bold">Companies</h1>
           <p className="text-sm text-slate-600 mt-1">
             Manage company records and team assignments
           </p>
         </div>
-        <Button onClick={() => setCreateDrawerOpen(true)}>
+        <Button onClick={() => setCreateDrawerOpen(true)} className="w-full sm:w-auto">
           <Plus className="h-4 w-4 mr-2" />
           New Company
         </Button>
       </div>
 
       <div className="flex gap-4 items-center">
-        <div className="relative flex-1 max-w-md">
+        <div className="relative flex-1">
           <Search className="h-4 w-4 absolute left-3 top-3 text-slate-400" />
           <Input
             placeholder="Search companies..."

@@ -247,36 +247,37 @@ export const UnifiedInboxPage: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
         <div>
-          <h1 className="text-2xl font-bold">Unified Inbox</h1>
+          <h1 className="text-xl sm:text-2xl font-bold">Unified Inbox</h1>
           <p className="text-sm text-slate-600 mt-1">
             Manage conversations from all channels
           </p>
         </div>
         <div className="flex gap-2">
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             size="sm"
             onClick={handleArchive}
             disabled={selectedItems.length === 0}
           >
-            <Archive className="h-4 w-4 mr-2" />
-            Archive
+            <Archive className="h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Archive</span>
           </Button>
-          <Button 
+          <Button
+            size="sm"
             onClick={handleToggleReadUnread}
             disabled={toggleTargetIds.length === 0 || markAsReadMutation.isPending || markAsUnreadMutation.isPending}
           >
             {anyToggleTargetUnread ? (
               <>
-                <Eye className="h-4 w-4 mr-2" />
-                Mark as Read
+                <Eye className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Mark as Read</span>
               </>
             ) : (
               <>
-                <EyeOff className="h-4 w-4 mr-2" />
-                Mark as Unread
+                <EyeOff className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Mark as Unread</span>
               </>
             )}
           </Button>
@@ -284,7 +285,7 @@ export const UnifiedInboxPage: React.FC = () => {
       </div>
 
       <div className="flex gap-3 items-center">
-        <div className="relative flex-1 max-w-md">
+        <div className="relative flex-1">
           <Search className="h-4 w-4 absolute left-3 top-3 text-slate-400" />
           <Input
             placeholder="Search conversations..."

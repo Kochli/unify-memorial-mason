@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   ChevronLeft, ChevronRight, Home, Inbox, MapPin, Hammer, ListCheck,
   Users, Building2, Landmark, Italic, ScrollText, CreditCard,
-  FileText, ChartBar, Bell, MessageSquare, UserCog
+  FileText, ChartBar, Bell, MessageSquare, UserCog, Menu, X
 } from 'lucide-react';
 
 const allPages = [
@@ -27,7 +27,74 @@ const allPages = [
 
 export const ReviewNavToolbar: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
+  // Mobile: floating hamburger + slide-out drawer
+  if (isMobile) {
+    return (
+      <>
+        <button
+          onClick={() => setMobileOpen(true)}
+          className="fixed top-2 left-2 z-50 bg-slate-900 text-white p-2 rounded-lg shadow-lg"
+          aria-label="Open navigation"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+
+        {mobileOpen && (
+          <>
+            <div
+              className="fixed inset-0 bg-black/50 z-50"
+              onClick={() => setMobileOpen(false)}
+            />
+            <div className="fixed left-0 top-0 h-full w-56 z-50 bg-slate-900 text-white flex flex-col shadow-xl">
+              <div className="flex items-center justify-between p-3 border-b border-slate-700">
+                <span className="text-xs font-semibold text-slate-300 uppercase tracking-wide">
+                  Review Nav
+                </span>
+                <button
+                  onClick={() => setMobileOpen(false)}
+                  className="p-1 rounded hover:bg-slate-700 text-slate-400 hover:text-white"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <nav className="flex-1 overflow-y-auto py-1">
+                {allPages.map((page) => (
+                  <NavLink
+                    key={page.url}
+                    to={page.url}
+                    end={page.url === '/'}
+                    onClick={() => setMobileOpen(false)}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-3 py-2.5 text-sm transition-colors ${
+                        isActive
+                          ? 'bg-blue-600 text-white'
+                          : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                      }`
+                    }
+                  >
+                    <page.icon className="h-4 w-4 flex-shrink-0" />
+                    <span>{page.title}</span>
+                  </NavLink>
+                ))}
+              </nav>
+            </div>
+          </>
+        )}
+      </>
+    );
+  }
+
+  // Desktop: fixed sidebar
   return (
     <div
       className={`fixed left-0 top-0 h-full z-50 bg-slate-900 text-white flex flex-col transition-all duration-200 shadow-xl ${

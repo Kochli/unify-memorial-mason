@@ -64,7 +64,7 @@ export const MemorialsPage: React.FC = () => {
 
   if (error) {
     return (
-      <div className="container mx-auto p-6">
+      <div className="space-y-6">
         <Card>
           <CardContent className="pt-6">
             <div className="text-center">
@@ -78,15 +78,15 @@ export const MemorialsPage: React.FC = () => {
   }
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
         <div>
-          <h1 className="text-3xl font-bold">Products</h1>
+          <h1 className="text-xl sm:text-3xl font-bold">Products</h1>
           <p className="text-muted-foreground">
             Manage your product catalog
           </p>
         </div>
-        <Button onClick={() => setCreateDrawerOpen(true)}>
+        <Button onClick={() => setCreateDrawerOpen(true)} className="w-full sm:w-auto">
           <Plus className="mr-2 h-4 w-4" />
           New Product
         </Button>
@@ -103,7 +103,7 @@ export const MemorialsPage: React.FC = () => {
               placeholder="Search products..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="max-w-sm"
+              className="flex-1"
             />
           </div>
 

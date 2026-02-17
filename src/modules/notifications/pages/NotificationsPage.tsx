@@ -89,15 +89,15 @@ export const NotificationsPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
         <div>
-          <h1 className="text-2xl font-bold">Notifications</h1>
+          <h1 className="text-xl sm:text-2xl font-bold">Notifications</h1>
           <p className="text-sm text-slate-600 mt-1">
             {unreadCount > 0 ? `${unreadCount} unread notifications` : "All caught up!"}
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={markAllAsRead}>
+          <Button variant="outline" size="sm" onClick={markAllAsRead} className="w-full sm:w-auto">
             <Check className="h-4 w-4 mr-2" />
             Mark all as read
           </Button>

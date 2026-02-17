@@ -86,9 +86,9 @@ export const TeamChatPage: React.FC = () => {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-[calc(100vh-220px)]">
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6 h-auto md:h-[calc(100vh-220px)]">
         {/* Sidebar - Channels & Members */}
-        <Card className="lg:col-span-1 flex flex-col">
+        <Card className="md:col-span-1 flex flex-col max-h-[300px] md:max-h-none">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm flex items-center gap-2">
               <Hash className="h-4 w-4" />
@@ -151,7 +151,7 @@ export const TeamChatPage: React.FC = () => {
         </Card>
 
         {/* Main Chat Area */}
-        <Card className="lg:col-span-3 flex flex-col">
+        <Card className="md:col-span-2 lg:col-span-3 flex flex-col min-h-[400px]">
           {/* Channel Header */}
           <CardHeader className="border-b pb-3">
             <div className="flex items-center justify-between">

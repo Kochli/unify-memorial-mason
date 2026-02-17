@@ -7,7 +7,7 @@ const App = () => (
   <Providers>
     <BrowserRouter>
       <ReviewNavToolbar />
-      <div className="pl-44">
+      <div className="md:pl-44">
         <AppRouter />
       </div>
     </BrowserRouter>

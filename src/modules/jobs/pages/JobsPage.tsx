@@ -175,7 +175,7 @@ export const JobsPage: React.FC = () => {
     }
 
     return (
-      <Table>
+      <div className="overflow-x-auto"><Table>
         <TableHeader>
           <TableRow>
             <TableHead>Customer</TableHead>
@@ -297,20 +297,20 @@ export const JobsPage: React.FC = () => {
             </TableRow>
           ))}
         </TableBody>
-      </Table>
+      </Table></div>
     );
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
         <div>
-          <h1 className="text-2xl font-bold">Jobs</h1>
+          <h1 className="text-xl sm:text-2xl font-bold">Jobs</h1>
           <p className="text-sm text-slate-600 mt-1">
             Manage installation jobs and schedules
           </p>
         </div>
-        <Button onClick={() => setCreateDrawerOpen(true)}>
+        <Button onClick={() => setCreateDrawerOpen(true)} className="w-full sm:w-auto">
           <Plus className="h-4 w-4 mr-2" />
           New Job
         </Button>
@@ -321,7 +321,7 @@ export const JobsPage: React.FC = () => {
           <CardTitle>Job List</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex gap-4 mb-4">
+          <div className="flex flex-col gap-3 sm:flex-row mb-4">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -331,8 +331,9 @@ export const JobsPage: React.FC = () => {
                 className="pl-10"
               />
             </div>
+            <div className="flex gap-3">
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[180px]">
+              <SelectTrigger className="w-full sm:w-[180px]">
                 <SelectValue placeholder="Filter by status" />
               </SelectTrigger>
               <SelectContent>
@@ -346,7 +347,7 @@ export const JobsPage: React.FC = () => {
             </Select>
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" className="w-[180px] justify-start">
+                <Button variant="outline" className="w-full sm:w-[180px] justify-start">
                   <UserCog className="h-4 w-4 mr-2" />
                   {selectedWorkerIds.length > 0
                     ? `${selectedWorkerIds.length} worker${selectedWorkerIds.length !== 1 ? 's' : ''}`
@@ -398,6 +399,7 @@ export const JobsPage: React.FC = () => {
                 </div>
               </PopoverContent>
             </Popover>
+            </div>
           </div>
           {selectedWorkerIds.length > 0 && workers && (
             <div className="flex flex-wrap gap-2 mb-4">

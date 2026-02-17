@@ -134,7 +134,7 @@ export const PaymentsPage: React.FC = () => {
 
   if (error) {
     return (
-      <div className="container mx-auto p-6">
+      <div className="space-y-6">
         <Card>
           <CardContent className="pt-6">
             <div className="text-center">
@@ -148,15 +148,15 @@ export const PaymentsPage: React.FC = () => {
   }
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
         <div>
-          <h1 className="text-3xl font-bold">Payments</h1>
+          <h1 className="text-xl sm:text-3xl font-bold">Payments</h1>
           <p className="text-muted-foreground">
             Manage payment records for invoices
           </p>
         </div>
-        <Button onClick={() => setCreateDrawerOpen(true)}>
+        <Button onClick={() => setCreateDrawerOpen(true)} className="w-full sm:w-auto">
           <Plus className="mr-2 h-4 w-4" />
           New Payment
         </Button>
@@ -168,15 +168,15 @@ export const PaymentsPage: React.FC = () => {
           <CardDescription>View and manage all payment records</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center gap-4 mb-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center mb-4">
             <Input
               placeholder="Search by invoice number, customer, reference, or notes..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="max-w-sm"
+              className="flex-1"
             />
             <Select value={methodFilter} onValueChange={setMethodFilter}>
-              <SelectTrigger className="w-[180px]">
+              <SelectTrigger className="w-full sm:w-[180px]">
                 <SelectValue placeholder="Filter by method" />
               </SelectTrigger>
               <SelectContent>
@@ -213,7 +213,7 @@ export const PaymentsPage: React.FC = () => {
               )}
             </div>
           ) : (
-            <Table>
+            <div className="overflow-x-auto"><Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
@@ -295,7 +295,7 @@ export const PaymentsPage: React.FC = () => {
                   </TableRow>
                 ))}
               </TableBody>
-            </Table>
+            </Table></div>
           )}
         </CardContent>
       </Card>

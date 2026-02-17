@@ -112,7 +112,7 @@ export const InscriptionsPage: React.FC = () => {
 
   if (error) {
     return (
-      <div className="container mx-auto p-6">
+      <div className="space-y-6">
         <Card>
           <CardContent className="pt-6">
             <div className="text-center">
@@ -126,15 +126,15 @@ export const InscriptionsPage: React.FC = () => {
   }
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
         <div>
-          <h1 className="text-3xl font-bold">Inscriptions</h1>
+          <h1 className="text-xl sm:text-3xl font-bold">Inscriptions</h1>
           <p className="text-muted-foreground">
             Manage inscription items for memorial orders
           </p>
         </div>
-        <Button onClick={() => setCreateDrawerOpen(true)}>
+        <Button onClick={() => setCreateDrawerOpen(true)} className="w-full sm:w-auto">
           <Plus className="mr-2 h-4 w-4" />
           New Inscription
         </Button>
@@ -146,15 +146,15 @@ export const InscriptionsPage: React.FC = () => {
           <CardDescription>View and manage all inscription records</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center gap-4 mb-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center mb-4">
             <Input
               placeholder="Search by inscription text, style, or engraver..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="max-w-sm"
+              className="flex-1"
             />
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[180px]">
+              <SelectTrigger className="w-full sm:w-[180px]">
                 <SelectValue placeholder="Filter by status" />
               </SelectTrigger>
               <SelectContent>
@@ -191,7 +191,7 @@ export const InscriptionsPage: React.FC = () => {
               )}
             </div>
           ) : (
-            <Table>
+            <div className="overflow-x-auto"><Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Order</TableHead>
@@ -257,7 +257,7 @@ export const InscriptionsPage: React.FC = () => {
                   </TableRow>
                 ))}
               </TableBody>
-            </Table>
+            </Table></div>
           )}
         </CardContent>
       </Card>
