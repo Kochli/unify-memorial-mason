@@ -7,12 +7,15 @@ import { PermitDetailPanel } from '../components/PermitDetailPanel';
 import { SearchTerminal } from '../components/SearchTerminal';
 import { SubmitPermitDialog } from '../components/SubmitPermitDialog';
 import type { PermitPipelineItem, PermitPhase, SearchResult } from '../types/permitAgent.types';
+import { sendGmailNewEmail } from '@/modules/inbox/api/inboxGmail.api';
+import { useToast } from '@/shared/hooks/use-toast';
 
 export const PermitAgentPage: React.FC = () => {
   const { data: pipeline, isLoading, error, refetch } = usePermitPipeline();
   const updatePermit = useUpdateOrderPermit();
   const createActivity = useCreateActivity();
   const initializePermits = useInitializePermits();
+  const { toast } = useToast();
 
   const [selectedItem, setSelectedItem] = useState<PermitPipelineItem | null>(null);
   const [showSearch, setShowSearch] = useState(false);
@@ -89,6 +92,26 @@ export const PermitAgentPage: React.FC = () => {
   const handleSubmitPermit = async (emailData: { to: string; subject: string; body: string }) => {
     if (!selectedItem) return;
 
+    // Send the email via Gmail, creating an inbox conversation to track replies
+    let conversationId: string | null = null;
+    let emailSent = false;
+    try {
+      const result = await sendGmailNewEmail({
+        to: emailData.to,
+        subject: emailData.subject,
+        bodyText: emailData.body,
+      });
+      conversationId = result.conversationId;
+      emailSent = true;
+    } catch (err) {
+      console.error('Failed to send permit submission email', err);
+      toast({
+        title: 'Email failed to send',
+        description: err instanceof Error ? err.message : 'Could not send via Gmail. Status updated locally.',
+        variant: 'destructive',
+      });
+    }
+
     const readinessBoost = Math.min(selectedItem.permit.readiness_score + 25, 100);
 
     await updatePermit.mutateAsync({
@@ -103,11 +126,26 @@ export const PermitAgentPage: React.FC = () => {
     await createActivity.mutateAsync({
       order_permit_id: selectedItem.permit.id,
       activity_type: 'SUBMITTED',
-      description: `Permit application submitted to ${emailData.to}`,
-      metadata: { subject: emailData.subject },
+      description: emailSent
+        ? `Permit application emailed to ${emailData.to}`
+        : `Permit phase set to Submitted (email to ${emailData.to} failed — send manually)`,
+      metadata: {
+        subject: emailData.subject,
+        to: emailData.to,
+        email_sent: emailSent,
+        ...(conversationId ? { inbox_conversation_id: conversationId } : {}),
+      },
     });
 
     setSubmitDialogOpen(false);
+
+    if (emailSent) {
+      toast({
+        title: 'Permit application submitted',
+        description: `Email sent to ${emailData.to}. Thread tracked in the unified inbox.`,
+      });
+    }
+
     refetch();
   };
 

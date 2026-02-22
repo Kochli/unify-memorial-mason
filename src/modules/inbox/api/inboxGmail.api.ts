@@ -15,6 +15,13 @@ interface SendGmailReplyResult {
   gmailThreadId: string;
 }
 
+interface SendGmailNewThreadResult {
+  success: true;
+  gmailMessageId: string;
+  gmailThreadId: string;
+  conversationId: string;
+}
+
 /**
  * Sync Gmail emails into inbox_conversations and inbox_messages
  */
@@ -84,4 +91,46 @@ export async function sendGmailReply({
   }
 
   return await response.json() as SendGmailReplyResult;
+}
+
+/**
+ * Send a new outbound Gmail email, creating a new inbox conversation to track replies
+ */
+export async function sendGmailNewEmail({
+  to,
+  subject,
+  bodyText,
+}: {
+  to: string;
+  subject: string;
+  bodyText: string;
+}): Promise<SendGmailNewThreadResult> {
+  const functionsUrl = import.meta.env.VITE_SUPABASE_FUNCTIONS_URL;
+  const adminToken = import.meta.env.VITE_INBOX_ADMIN_TOKEN;
+
+  if (!functionsUrl || !adminToken) {
+    throw new Error(
+      'Gmail send requires VITE_SUPABASE_FUNCTIONS_URL and VITE_INBOX_ADMIN_TOKEN environment variables'
+    );
+  }
+
+  const response = await fetch(`${functionsUrl}/inbox-gmail-new-thread`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Admin-Token': adminToken,
+    },
+    body: JSON.stringify({
+      to,
+      subject,
+      body_text: bodyText,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(errorData.error || `Gmail send failed: ${response.statusText}`);
+  }
+
+  return await response.json() as SendGmailNewThreadResult;
 }
