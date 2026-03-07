@@ -1,14 +1,12 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { supabase } from '@/shared/lib/supabase';
+import { getAppUrl } from '@/shared/lib/appUrl';
 import { Button } from '@/shared/components/ui/button';
 import { Input } from '@/shared/components/ui/input';
 import { Label } from '@/shared/components/ui/label';
 
-const appUrl = import.meta.env.VITE_APP_URL || window.location.origin;
-
 export function LoginPage() {
-  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -21,7 +19,7 @@ export function LoginPage() {
     try {
       const { error: err } = await supabase.auth.signInWithPassword({ email, password });
       if (err) throw err;
-      navigate('/dashboard/inbox', { replace: true });
+      window.location.assign(`${getAppUrl()}/dashboard/inbox`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
@@ -33,12 +31,13 @@ export function LoginPage() {
     setError(null);
     setLoading(true);
     try {
+      const redirectTo = `${getAppUrl()}/auth/callback`;
       const { error: err } = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo: `${appUrl}` },
+        options: { redirectTo },
       });
       if (err) throw err;
-      // Redirect is handled by Supabase
+      // Supabase redirects the browser to Google, then back to redirectTo (staging callback)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Google sign-in failed');
       setLoading(false);
