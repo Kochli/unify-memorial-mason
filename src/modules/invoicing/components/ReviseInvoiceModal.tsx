@@ -10,8 +10,10 @@ import {
   AlertDialogTitle,
 } from '@/shared/components/ui/alert-dialog';
 import { useQueryClient } from '@tanstack/react-query';
-import { reviseStripeInvoice, createStripeInvoice } from '../api/stripe.api';
+import { reviseStripeInvoice } from '../api/stripe.api';
+import { fetchInvoice } from '../api/invoicing.api';
 import { invoicesKeys } from '../hooks/useInvoices';
+import { ensureStripeInvoice } from '../utils/ensureStripeInvoice';
 import { useToast } from '@/shared/hooks/use-toast';
 import type { Invoice } from '../types/invoicing.types';
 
@@ -38,7 +40,16 @@ export const ReviseInvoiceModal: React.FC<ReviseInvoiceModalProps> = ({
     setLoading(true);
     try {
       const data = await reviseStripeInvoice(invoice.id);
-      await createStripeInvoice(data.new_invoice_id);
+      const revisedInvoice = await fetchInvoice(data.new_invoice_id);
+      await ensureStripeInvoice(
+        {
+          id: revisedInvoice.id,
+          amount: revisedInvoice.amount,
+          stripe_invoice_id: revisedInvoice.stripe_invoice_id ?? null,
+          hasOrders: true,
+        },
+        { queryClient }
+      );
       await queryClient.invalidateQueries({ queryKey: invoicesKeys.all });
       await queryClient.invalidateQueries({ queryKey: invoicesKeys.detail(invoice.id) });
       await queryClient.invalidateQueries({ queryKey: invoicesKeys.detail(data.new_invoice_id) });

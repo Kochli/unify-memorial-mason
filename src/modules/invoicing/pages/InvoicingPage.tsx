@@ -18,6 +18,7 @@ import { InvoiceDetailSidebar } from '../components/InvoiceDetailSidebar';
 import { ExpandedInvoiceOrders } from '../components/ExpandedInvoiceOrders';
 import { CustomerDetailsPopover } from '@/shared/components/customer/CustomerDetailsPopover';
 import type { Invoice } from '../types/invoicing.types';
+import type { CreateStripeInvoiceResponse } from '../api/stripe.api';
 import { ColumnsDialog } from '@/shared/tableViewPresets/components/ColumnsDialog';
 import { usePresetsByModule } from '@/shared/tableViewPresets/hooks/useTableViewPresets';
 import { applyPresetToState, getDefaultState, extractStateToConfig } from '@/shared/tableViewPresets/utils/columnState';
@@ -47,6 +48,24 @@ export const InvoicingPage: React.FC = () => {
   const resizeRef = useRef<HTMLDivElement>(null);
   const columnStateInitializedRef = useRef(false);
   const [focusCollectPayment, setFocusCollectPayment] = useState(false);
+
+  const handleStripeInvoiceCreatedFromTable = useCallback(
+    (invoiceId: string, data: CreateStripeInvoiceResponse) => {
+      setSelectedInvoice((prev) =>
+        prev?.id === invoiceId
+          ? {
+              ...prev,
+              stripe_invoice_id: data.stripe_invoice_id,
+              hosted_invoice_url: data.hosted_invoice_url ?? prev.hosted_invoice_url,
+              stripe_invoice_status: (data.stripe_invoice_status ?? prev.stripe_invoice_status) ?? null,
+              amount_paid: data.amount_paid ?? prev.amount_paid,
+              amount_remaining: data.amount_remaining ?? prev.amount_remaining,
+            }
+          : prev
+      );
+    },
+    []
+  );
 
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
@@ -342,10 +361,10 @@ export const InvoicingPage: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-w-0">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold">Invoicing</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Invoicing</h1>
           <p className="text-sm text-slate-600 mt-1">
             Manage invoices and track payments
           </p>
@@ -454,6 +473,7 @@ export const InvoicingPage: React.FC = () => {
                   {searchQuery ? 'No invoices match your search.' : 'No invoices found.'}
                 </div>
               ) : (
+                <div className="overflow-x-auto min-w-0">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -536,11 +556,16 @@ export const InvoicingPage: React.FC = () => {
                         </TableCell>
                       </TableRow>,
                       expandedInvoices.has(invoice.id) && (
-                        <ExpandedInvoiceOrders key={`${invoice.id}-expanded`} invoiceId={invoice.id} />
+                        <ExpandedInvoiceOrders
+                          key={`${invoice.id}-expanded`}
+                          invoiceId={invoice.id}
+                          onStripeInvoiceCreated={handleStripeInvoiceCreatedFromTable}
+                        />
                       ),
                     ])}
                   </TableBody>
                 </Table>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -582,6 +607,15 @@ export const InvoicingPage: React.FC = () => {
         />
       )}
 
+      {/* Backdrop: close sidebar when clicking outside */}
+      {selectedInvoice && (
+        <div
+          className="fixed inset-0 z-40 bg-black/10"
+          onClick={() => setSelectedInvoice(null)}
+          aria-hidden
+        />
+      )}
+
       {/* Invoice Detail Sidebar */}
       <InvoiceDetailSidebar
         invoice={selectedInvoice}
@@ -592,6 +626,20 @@ export const InvoicingPage: React.FC = () => {
         }}
         onSelectInvoice={(id) => {
           fetchInvoice(id).then(setSelectedInvoice).catch(() => {});
+        }}
+        onStripeInvoiceCreated={(data) => {
+          setSelectedInvoice((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  stripe_invoice_id: data.stripe_invoice_id,
+                  hosted_invoice_url: data.hosted_invoice_url ?? prev.hosted_invoice_url,
+                  stripe_invoice_status: (data.stripe_invoice_status ?? prev.stripe_invoice_status) ?? null,
+                  amount_paid: data.amount_paid ?? prev.amount_paid,
+                  amount_remaining: data.amount_remaining ?? prev.amount_remaining,
+                }
+              : null
+          );
         }}
         focusCollectPayment={focusCollectPayment}
         onCollectFocused={() => setFocusCollectPayment(false)}

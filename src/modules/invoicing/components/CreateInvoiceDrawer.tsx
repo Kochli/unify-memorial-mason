@@ -21,8 +21,10 @@ import {
   SelectValue,
 } from '@/shared/components/ui/select';
 import { Button } from '@/shared/components/ui/button';
-import { useCreateInvoice } from '../hooks/useInvoices';
+import { useCreateInvoice, invoicesKeys } from '../hooks/useInvoices';
 import { invoiceFormSchema, type InvoiceFormData } from '../schemas/invoice.schema';
+import { ensureStripeInvoice } from '../utils/ensureStripeInvoice';
+import { useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/shared/hooks/use-toast';
 import { useCustomersList } from '@/modules/customers/hooks/useCustomers';
 import { useCreateOrder, useCreateAdditionalOption } from '@/modules/orders/hooks/useOrders';
@@ -32,6 +34,7 @@ import { getOrderTotal } from '@/modules/orders/utils/orderCalculations';
 import type { Order } from '@/modules/orders/types/orders.types';
 import { toMoneyNumber } from '@/modules/orders/utils/numberParsing';
 import { useGeocodeOrderAddress } from '@/modules/orders/hooks/useGeocodeOrderAddress';
+import { getDefaultDueDate } from '../utils/dateDefaults';
 
 interface CreateInvoiceDrawerProps {
   open: boolean;
@@ -78,6 +81,7 @@ export const CreateInvoiceDrawer: React.FC<CreateInvoiceDrawerProps> = ({
   open,
   onOpenChange,
 }) => {
+  const queryClient = useQueryClient();
   const { mutateAsync: createInvoiceAsync, isPending } = useCreateInvoice();
   const { mutateAsync: createOrderAsync } = useCreateOrder();
   const { mutateAsync: createOptionAsync } = useCreateAdditionalOption();
@@ -114,7 +118,7 @@ export const CreateInvoiceDrawer: React.FC<CreateInvoiceDrawerProps> = ({
       customer_name: '',
       amount: 0,
       status: 'pending',
-      due_date: '',
+      due_date: getDefaultDueDate(),
       issue_date: new Date().toISOString().split('T')[0],
       payment_method: 'Credit Card',
       payment_date: null,
@@ -122,13 +126,35 @@ export const CreateInvoiceDrawer: React.FC<CreateInvoiceDrawerProps> = ({
     },
   });
 
-  // Clear any draft state when the drawer has been closed
+  // Clear any draft state when the drawer has been closed; reset dates to "today" and "today + 3 days"
   useOnDrawerReset(() => {
-    form.reset();
+    form.reset({
+      customer_name: '',
+      amount: 0,
+      status: 'pending',
+      due_date: getDefaultDueDate(),
+      issue_date: new Date().toISOString().split('T')[0],
+      payment_method: 'Credit Card',
+      payment_date: null,
+      notes: null,
+    });
     setOrders([]);
     setSelectedProductIds({});
     setDimensions({});
   });
+
+  // When drawer opens in create mode, ensure due_date and issue_date are prefilled so they are visible
+  useEffect(() => {
+    if (!open) return;
+    const due = form.getValues('due_date');
+    if (!due?.trim()) {
+      form.setValue('due_date', getDefaultDueDate(), { shouldDirty: false, shouldValidate: false });
+    }
+    const issue = form.getValues('issue_date');
+    if (!issue?.trim()) {
+      form.setValue('issue_date', new Date().toISOString().split('T')[0], { shouldDirty: false, shouldValidate: false });
+    }
+  }, [open, form]);
 
   // Update form with calculated amount
   useEffect(() => {
@@ -195,89 +221,93 @@ export const CreateInvoiceDrawer: React.FC<CreateInvoiceDrawerProps> = ({
     };
 
     try {
+      // Fast path: only await invoice creation
       const createdInvoice = await createInvoiceAsync(invoiceData);
-      
-      // Create all Orders with invoice_id
-      // If invoice has customer_name, try to match it to a customer to get person_id
-      const invoicePerson = data.customer_name && data.customer_name.trim() 
-        ? customers?.find(c => `${c.first_name} ${c.last_name}` === data.customer_name.trim())
-        : null;
 
-      const orderPromises = orders.map(async (order) => {
-        const notesValue = buildNotes(dimensions[order.id] || '', order.data.notes || '');
-        
-        // For New Memorial orders: ensure value is a valid number (not null/NaN)
-        // If no product selected or value is missing, default to 0
-        const orderValue = order.data.order_type === 'Renovation' 
-          ? null // Renovation orders use renovation_service_cost as base value
-          : (order.data.value !== null && order.data.value !== undefined && !isNaN(order.data.value))
-            ? order.data.value
-            : 0; // Default to 0 for New Memorial if value is missing/invalid
-        
-        const orderData = {
-          customer_name: order.data.customer_name?.trim() || '',
-          location: order.data.location?.trim() || '',
-          sku: order.data.sku?.trim() || '',
-          order_type: order.data.order_type!,
-          material: order.data.material || null,
-          color: order.data.color || null,
-          // For Renovation orders, value should be null (base value comes from renovation_service_cost)
-          // For New Memorial orders, value must be a valid number (defaults to 0 if missing)
-          value: orderValue,
-          // DB constraint: permit_cost is NOT NULL DEFAULT 0, so we must send 0 (not null) when empty
-          permit_cost: toMoneyNumber(order.data.permit_cost),
-          // Product photo URL snapshot: Only for New Memorial orders, null for Renovation
-          product_photo_url: order.data.order_type === 'Renovation' 
-            ? null // Renovation orders don't have product photos
-            : (order.data.productPhotoUrl ?? null), // Snapshot photo URL for New Memorial orders
-          // Renovation service fields (only used for Renovation order types)
-          // For New Memorial: explicitly set to null/0 to satisfy NOT NULL constraints
-          renovation_service_description: order.data.order_type === 'Renovation' 
-            ? (order.data.renovation_service_description?.trim() || null)
-            : null, // Explicitly null for New Memorial orders
-          renovation_service_cost: order.data.order_type === 'Renovation' 
-            ? toMoneyNumber(order.data.renovation_service_cost) // Blank => 0 for Renovation
-            : 0, // Must be 0 for New Memorial orders (NOT NULL constraint, cannot send null)
-          notes: notesValue,
-          // Person assignment: inherit from invoice if available
-          person_id: invoicePerson?.id || null,
-          person_name: invoicePerson ? `${invoicePerson.first_name} ${invoicePerson.last_name}` : null,
-          customer_email: null,
-          customer_phone: null,
-          stone_status: 'NA' as const,
-          permit_status: 'pending' as const,
-          proof_status: 'Not_Received' as const,
-          deposit_date: null,
-          second_payment_date: null,
-          due_date: null,
-          installation_date: null,
-          progress: 0,
-          assigned_to: null,
-          priority: 'medium' as const,
-          timeline_weeks: 12,
-          invoice_id: createdInvoice.id,
-        };
+      // Close drawer immediately and show success
+      toast({
+        title: 'Invoice created',
+        description: orders.length > 0
+          ? `Adding ${orders.length} order(s) in the background.`
+          : 'Invoice created successfully.',
+      });
+      form.reset({
+        customer_name: '',
+        amount: 0,
+        status: 'pending',
+        due_date: getDefaultDueDate(),
+        issue_date: new Date().toISOString().split('T')[0],
+        payment_method: 'Credit Card',
+        payment_date: null,
+        notes: null,
+      });
+      setOrders([]);
+      setSelectedProductIds({});
+      setDimensions({});
+      onOpenChange(false);
 
-        // Create the order first
-        const createdOrder = await createOrderAsync(orderData);
+      // Background path: orders, Stripe, invalidations (non-blocking)
+      const ordersSnapshot = [...orders];
+      const dimensionsSnapshot = { ...dimensions };
+      const customersSnapshot = customers;
+      const customerNameSnapshot = data.customer_name?.trim();
+      const invoiceId = createdInvoice.id;
 
-        // After order is created, trigger geocoding in the background if location present
-        const locationForGeocode = orderData.location?.trim();
-        if (locationForGeocode && locationForGeocode.length >= 6) {
-          geocodeMutation.mutate({
-            orderId: createdOrder.id,
-            location: locationForGeocode,
-          });
-        }
-        
-        // Create additional options if any
-        const additionalOptions = order.data.additional_options || [];
-        if (additionalOptions.length > 0) {
-          let successCount = 0;
-          let errorCount = 0;
-          const totalOptions = additionalOptions.filter(opt => opt.name?.trim()).length;
-          
-          // Create each option
+      (async () => {
+        const invoicePerson = customerNameSnapshot && customersSnapshot
+          ? customersSnapshot.find(c => `${c.first_name} ${c.last_name}` === customerNameSnapshot)
+          : null;
+
+        const orderPromises = ordersSnapshot.map(async (order) => {
+          const notesValue = buildNotes(dimensionsSnapshot[order.id] || '', order.data.notes || '');
+          const orderValue = order.data.order_type === 'Renovation'
+            ? null
+            : (order.data.value !== null && order.data.value !== undefined && !isNaN(order.data.value))
+              ? order.data.value
+              : 0;
+          const orderData = {
+            customer_name: order.data.customer_name?.trim() || '',
+            location: order.data.location?.trim() || '',
+            sku: order.data.sku?.trim() || '',
+            order_type: order.data.order_type!,
+            material: order.data.material || null,
+            color: order.data.color || null,
+            value: orderValue,
+            permit_cost: toMoneyNumber(order.data.permit_cost),
+            permit_form_id: order.data.permit_form_id ?? null,
+            product_photo_url: order.data.order_type === 'Renovation'
+              ? null
+              : (order.data.productPhotoUrl ?? null),
+            renovation_service_description: order.data.order_type === 'Renovation'
+              ? (order.data.renovation_service_description?.trim() || null)
+              : null,
+            renovation_service_cost: order.data.order_type === 'Renovation'
+              ? toMoneyNumber(order.data.renovation_service_cost)
+              : 0,
+            notes: notesValue,
+            person_id: invoicePerson?.id || null,
+            person_name: invoicePerson ? `${invoicePerson.first_name} ${invoicePerson.last_name}` : null,
+            customer_email: null,
+            customer_phone: null,
+            stone_status: 'NA' as const,
+            permit_status: 'pending' as const,
+            proof_status: 'Not_Received' as const,
+            deposit_date: null,
+            second_payment_date: null,
+            due_date: null,
+            installation_date: null,
+            progress: 0,
+            assigned_to: null,
+            priority: 'medium' as const,
+            timeline_weeks: 12,
+            invoice_id: invoiceId,
+          };
+          const createdOrder = await createOrderAsync(orderData);
+          const locationForGeocode = orderData.location?.trim();
+          if (locationForGeocode && locationForGeocode.length >= 6) {
+            geocodeMutation.mutate({ orderId: createdOrder.id, location: locationForGeocode });
+          }
+          const additionalOptions = order.data.additional_options || [];
           for (const option of additionalOptions) {
             if (option.name?.trim()) {
               try {
@@ -287,56 +317,54 @@ export const CreateInvoiceDrawer: React.FC<CreateInvoiceDrawerProps> = ({
                   cost: toMoneyNumber(option.cost),
                   description: option.description?.trim() || null,
                 });
-                successCount++;
-              } catch (error) {
-                console.error('Failed to create additional option:', error);
-                errorCount++;
+              } catch (err) {
+                console.error('Failed to create additional option:', err);
+                toast({
+                  title: 'Order created with warnings',
+                  description: `Some additional options could not be added.`,
+                  variant: 'destructive',
+                });
               }
             }
           }
-          
-          // Show warning if some options failed
-          if (errorCount > 0) {
-            toast({
-              title: 'Order created with warnings',
-              description: `Order created. ${successCount} option(s) added, ${errorCount} failed.`,
-              variant: 'destructive',
-            });
-          }
-        }
-        
-        return createdOrder;
-      });
+          return createdOrder;
+        });
 
-      try {
-        await Promise.all(orderPromises);
-        toast({
-          title: 'Invoice created',
-          description: `Invoice and ${orders.length} order(s) created successfully.`,
-        });
-        form.reset();
-        setOrders([]);
-        setSelectedProductIds({});
-        setDimensions({});
-        onOpenChange(false);
-      } catch (error) {
-        // Log the actual error for debugging
-        console.error('INLINE ORDER CREATE ERROR', error);
-        
-        // Extract error message from Supabase error (which often has a message property)
-        let errorMessage = 'Failed to create some orders.';
-        if (error instanceof Error) {
-          errorMessage = error.message;
-        } else if (typeof error === 'object' && error !== null && 'message' in error) {
-          errorMessage = String(error.message);
+        try {
+          await Promise.all(orderPromises);
+          if (finalAmount > 0 && ordersSnapshot.length > 0) {
+            try {
+              await ensureStripeInvoice(
+                {
+                  id: invoiceId,
+                  amount: finalAmount,
+                  stripe_invoice_id: null,
+                  hasOrders: true,
+                },
+                { queryClient }
+              );
+            } catch (stripeErr) {
+              console.warn('Auto create Stripe invoice failed', stripeErr);
+              toast({
+                title: 'Stripe link not created',
+                description: 'You can create the payment link from the table.',
+                variant: 'destructive',
+              });
+            }
+          }
+        } catch (err) {
+          console.error('INLINE ORDER CREATE ERROR', err);
+          const errorMessage = err instanceof Error ? err.message : 'Failed to create some orders.';
+          toast({
+            title: 'Partial success',
+            description: `Invoice created. Orders could not all be created: ${errorMessage}`,
+            variant: 'destructive',
+          });
+        } finally {
+          queryClient.invalidateQueries({ queryKey: invoicesKeys.all });
+          queryClient.invalidateQueries({ queryKey: invoicesKeys.detail(invoiceId) });
         }
-        
-        toast({
-          title: 'Partial Success',
-          description: `Invoice created, but some orders failed to create. ${errorMessage}`,
-          variant: 'destructive',
-        });
-      }
+      })();
     } catch (error) {
       const description = error instanceof Error ? error.message : 'Failed to create invoice.';
       toast({
@@ -545,7 +573,7 @@ export const CreateInvoiceDrawer: React.FC<CreateInvoiceDrawerProps> = ({
                         <FormControl>
                           <Input
                             type="date"
-                            value={field.value || ''}
+                            value={field.value ?? ''}
                             onChange={(e) => field.onChange(e.target.value || '')}
                           />
                         </FormControl>

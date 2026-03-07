@@ -1,3 +1,5 @@
+import { supabase } from '@/shared/lib/supabase';
+
 interface SendTwilioMessageRequest {
   conversation_id: string;
   body_text: string;
@@ -10,25 +12,30 @@ interface SendTwilioMessageResponse {
   error?: string;
 }
 
+/**
+ * Send a message via WhatsApp/SMS using the current user's Twilio connection.
+ * Uses Supabase JWT so the Edge Function can identify the user and use their stored credentials.
+ */
 export async function sendTwilioMessage(
   request: SendTwilioMessageRequest,
 ): Promise<SendTwilioMessageResponse> {
   const functionsUrl = import.meta.env.VITE_SUPABASE_FUNCTIONS_URL as string | undefined;
-  const adminToken = import.meta.env.VITE_INBOX_ADMIN_TOKEN as string | undefined;
-
   if (!functionsUrl) {
     throw new Error('VITE_SUPABASE_FUNCTIONS_URL is not configured');
   }
 
-  if (!adminToken) {
-    throw new Error('VITE_INBOX_ADMIN_TOKEN is not configured');
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session?.access_token) {
+    throw new Error('You must be signed in to send messages');
   }
 
   const response = await fetch(`${functionsUrl}/inbox-twilio-send`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Admin-Token': adminToken,
+      Authorization: `Bearer ${session.access_token}`,
     },
     body: JSON.stringify(request),
   });
@@ -46,4 +53,3 @@ export async function sendTwilioMessage(
     twilio_sid: data.twilio_sid ?? null,
   };
 }
-

@@ -1,5 +1,6 @@
 import { supabase } from '@/shared/lib/supabase';
 import type { Invoice, InvoiceInsert, InvoiceUpdate, InvoicePayment } from '../types/invoicing.types';
+import { getDefaultDueDate } from '../utils/dateDefaults';
 
 const functionsUrl = import.meta.env.VITE_SUPABASE_FUNCTIONS_URL as string | undefined;
 const adminToken = import.meta.env.VITE_INBOX_ADMIN_TOKEN as string | undefined;
@@ -28,15 +29,19 @@ function ensureFunctionsEnv(): { functionsUrl: string; adminToken: string; anonK
   };
 }
 
+/** Column list for invoices list so Stripe fields are always requested (table needs them for Full/Partial buttons) */
+const INVOICES_LIST_SELECT =
+  'id, order_id, invoice_number, customer_name, amount, status, due_date, issue_date, payment_method, payment_date, notes, created_at, updated_at, deleted_at, stripe_checkout_session_id, stripe_payment_intent_id, stripe_status, paid_at, stripe_invoice_id, stripe_invoice_status, hosted_invoice_url, amount_paid, amount_remaining, revised_from_invoice_id, locked_at, user_id';
+
 export async function fetchInvoices() {
   const { data, error } = await supabase
     .from('invoices')
-    .select('*')
+    .select(INVOICES_LIST_SELECT)
     .is('deleted_at', null)
     .order('created_at', { ascending: false });
-  
+
   if (error) throw error;
-  return data as Invoice[];
+  return (data ?? []) as Invoice[];
 }
 
 export async function fetchInvoice(id: string) {
@@ -52,6 +57,12 @@ export async function fetchInvoice(id: string) {
 }
 
 export async function createInvoice(invoice: InvoiceInsert) {
+  // Default due_date to 3 days after today when missing (e.g. legacy or API call without it)
+  const dueDate = invoice.due_date?.trim();
+  if (!dueDate) {
+    invoice = { ...invoice, due_date: getDefaultDueDate() };
+  }
+
   // Generate invoice number if not provided
   if (!invoice.invoice_number) {
     // Try to get next value from sequence via RPC

@@ -5,6 +5,7 @@ import {
   Users, Building2, Landmark, Italic, ScrollText, CreditCard,
   FileText, ChartBar, Bell, MessageSquare, UserCog, Menu, X, Bot
 } from 'lucide-react';
+import { useSidebarLayout } from './SidebarLayoutContext';
 
 const allPages = [
   { title: "Landing", url: "/", icon: Home },
@@ -27,7 +28,7 @@ const allPages = [
 ];
 
 export const ReviewNavToolbar: React.FC = () => {
-  const [collapsed, setCollapsed] = useState(false);
+  const { collapsed, setCollapsed } = useSidebarLayout();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 

@@ -1,10 +1,35 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from "@/shared/components/ui/button";
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { supabase } from '@/shared/lib/supabase';
+import type { User } from '@supabase/supabase-js';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/shared/components/ui/dropdown-menu';
+import { LogOut, Activity as ActivityIcon } from 'lucide-react';
 
 export const Navigation: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const navigate = useNavigate();
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    navigate('/login', { replace: true });
+  };
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   return (
     <header className="fixed w-full bg-white/90 backdrop-blur-sm z-50 border-b border-slate-200">
@@ -27,11 +52,41 @@ export const Navigation: React.FC = () => {
               <a href="#pricing" className="text-slate-600 hover:text-blue-600 px-3 py-2 text-sm font-medium">
                 Pricing
               </a>
-              <Button variant="outline" className="ml-4">
-                Log in
-              </Button>
-              <Button>
-                Start Free Trial
+              {user ? (
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="ml-4">
+                      Account
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        navigate('/dashboard/activity');
+                      }}
+                    >
+                      <ActivityIcon className="mr-2 h-4 w-4" />
+                      <span>My Activity</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={async (event) => {
+                        event.preventDefault();
+                        await handleLogout();
+                      }}
+                    >
+                      <LogOut className="mr-2 h-4 w-4" />
+                      <span>Sign out</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <Button variant="outline" className="ml-4" asChild>
+                  <Link to="/login">Log in</Link>
+                </Button>
+              )}
+              <Button asChild>
+                <Link to={user ? '/dashboard' : '/'}>{user ? 'Dashboard' : 'Start Free Trial'}</Link>
               </Button>
             </div>
           </div>
@@ -92,13 +147,47 @@ export const Navigation: React.FC = () => {
           </a>
           <div className="pt-4 pb-3 border-t border-slate-200">
             <div className="flex items-center px-5">
-              <Button variant="outline" className="w-full justify-center mb-2">
-                Log in
-              </Button>
+              {user ? (
+                <DropdownMenu modal={false}>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" className="w-full justify-center mb-2">
+                      Account
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuItem
+                      onSelect={(event) => {
+                        event.preventDefault();
+                        setMobileMenuOpen(false);
+                        navigate('/dashboard/activity');
+                      }}
+                    >
+                      <ActivityIcon className="mr-2 h-4 w-4" />
+                      <span>My Activity</span>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={async (event) => {
+                        event.preventDefault();
+                        setMobileMenuOpen(false);
+                        await handleLogout();
+                      }}
+                    >
+                      <LogOut className="mr-2 h-4 w-4" />
+                      <span>Sign out</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <Button variant="outline" className="w-full justify-center mb-2" asChild>
+                  <Link to="/login" onClick={() => setMobileMenuOpen(false)}>Log in</Link>
+                </Button>
+              )}
             </div>
             <div className="flex items-center px-5">
-              <Button className="w-full justify-center">
-                Start Free Trial
+              <Button className="w-full justify-center" asChild>
+                <Link to={user ? '/dashboard' : '/'} onClick={() => setMobileMenuOpen(false)}>
+                  {user ? 'Dashboard' : 'Start Free Trial'}
+                </Link>
               </Button>
             </div>
           </div>

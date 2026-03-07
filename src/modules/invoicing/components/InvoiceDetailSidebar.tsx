@@ -5,13 +5,26 @@ import { Badge } from "@/shared/components/ui/badge";
 import { Input } from "@/shared/components/ui/input";
 import { X, Calendar, Plus, Copy, ExternalLink, Send, FileEdit, AlertTriangle } from 'lucide-react';
 import { useOrdersByInvoice } from '@/modules/orders/hooks/useOrders';
+import { usePermitForms } from '@/modules/permitForms/hooks/usePermitForms';
 import { CreateOrderDrawer } from '@/modules/orders/components/CreateOrderDrawer';
 import { CustomerDetailsPopover } from '@/shared/components/customer/CustomerDetailsPopover';
 import { useToast } from '@/shared/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Invoice } from '../types/invoicing.types';
-import { getOrderTotalFormatted } from '@/modules/orders/utils/orderCalculations';
+import type { Order } from '@/modules/orders/types/orders.types';
+import {
+  getOrderTotalFormatted,
+  getOrderBaseValue,
+  getOrderPermitCost,
+  getOrderAdditionalOptionsTotal,
+  getOrderTotal,
+} from '@/modules/orders/utils/orderCalculations';
+import { getOrderDisplayId } from '@/modules/orders/utils/orderDisplayId';
+import { useMemorialsList } from '@/modules/memorials/hooks/useMemorials';
+import { transformMemorialsFromDb } from '@/modules/memorials/utils/memorialTransform';
+import type { UIMemorial } from '@/modules/memorials/utils/memorialTransform';
 import { createCheckoutSession, createStripeInvoice, sendStripeInvoice, createInvoicePaymentLink } from '../api/stripe.api';
+import type { CreateStripeInvoiceResponse } from '../api/stripe.api';
 import { invoicesKeys, useInvoicePayments } from '../hooks/useInvoices';
 
 interface InvoiceDetailSidebarProps {
@@ -19,6 +32,8 @@ interface InvoiceDetailSidebarProps {
   onClose: () => void;
   onReviseInvoice?: (invoice: Invoice) => void;
   onSelectInvoice?: (invoiceId: string) => void;
+  /** Called after Stripe invoice creation so parent can merge response into selected invoice (immediate UI update) */
+  onStripeInvoiceCreated?: (data: CreateStripeInvoiceResponse) => void;
   focusCollectPayment?: boolean;
   onCollectFocused?: () => void;
 }
@@ -48,6 +63,7 @@ export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({
   onClose,
   onReviseInvoice,
   onSelectInvoice,
+  onStripeInvoiceCreated,
   focusCollectPayment,
   onCollectFocused,
 }) => {
@@ -66,6 +82,36 @@ export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({
   const queryClient = useQueryClient();
   const { data: orders, isLoading: isOrdersLoading } = useOrdersByInvoice(invoice?.id ?? null);
   const { data: payments = [], isLoading: paymentsLoading } = useInvoicePayments(invoice?.id ?? null);
+  const { data: permitFormsList = [] } = usePermitForms();
+  const permitFormNameById = React.useMemo(() => {
+    const map: Record<string, string> = {};
+    permitFormsList.forEach((pf) => { map[pf.id] = pf.name ?? 'Permit'; });
+    return map;
+  }, [permitFormsList]);
+  const { data: memorialsData } = useMemorialsList();
+  const products = React.useMemo(() => {
+    if (!memorialsData) return [];
+    return transformMemorialsFromDb(memorialsData);
+  }, [memorialsData]);
+  const getOrderDisplayName = React.useCallback((order: Order): string => {
+    if (order.order_type === 'Renovation') {
+      const service = order.renovation_service_description?.trim();
+      return service || 'Renovation';
+    }
+    const match = products.find((p: UIMemorial) => {
+      const materialMatch = !order.material || !p.material ||
+        p.material?.toLowerCase() === order.material?.toLowerCase();
+      const colorMatch = !order.color || !p.color ||
+        p.color?.toLowerCase() === order.color?.toLowerCase();
+      const valueMatch = order.value == null || p.price == null ||
+        Math.abs((p.price ?? 0) - (order.value ?? 0)) < 0.01;
+      return materialMatch && colorMatch && valueMatch;
+    });
+    if (match) {
+      return match.name || match.memorialType || 'New Memorial';
+    }
+    return 'New Memorial';
+  }, [products]);
   const collectCardRef = useRef<HTMLDivElement | null>(null);
 
   // Derived values used by useEffect — must be computed before any return so hook order is stable
@@ -153,6 +199,7 @@ export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({
     setCreateStripeLoading(true);
     try {
       const data = await createStripeInvoice(invoice.id);
+      onStripeInvoiceCreated?.(data);
       queryClient.invalidateQueries({ queryKey: invoicesKeys.all });
       queryClient.invalidateQueries({ queryKey: invoicesKeys.detail(invoice.id) });
       if (data.hosted_invoice_url) {
@@ -354,18 +401,20 @@ export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({
   };
 
   return (
-    <div className="fixed right-0 top-0 h-full w-96 bg-background border-l shadow-lg z-50 overflow-y-auto">
-      <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-xl font-semibold">Invoice Details</h2>
-            <p className="text-sm text-muted-foreground">{invoice.invoice_number}</p>
-          </div>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            <X className="h-4 w-4" />
-          </Button>
+    <div className="fixed right-0 top-0 h-full w-96 bg-background border-l shadow-lg z-50 flex flex-col">
+      {/* Sticky header */}
+      <div className="sticky top-0 z-10 flex-shrink-0 flex items-center justify-between p-4 border-b bg-background">
+        <div>
+          <h2 className="text-xl font-semibold">Invoice Details</h2>
+          <p className="text-sm text-muted-foreground">{invoice.invoice_number}</p>
         </div>
-
+        <Button variant="ghost" size="sm" onClick={onClose}>
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+      {/* Scrollable body */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="p-6">
         {isLocked && (
           <div className="mb-4 rounded-md bg-amber-50 border border-amber-200 p-3 flex items-start gap-2">
             <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
@@ -419,7 +468,7 @@ export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({
                   <Button
                     type="button"
                     size="sm"
-                    className="w-full"
+                    className="w-full h-auto min-h-9 py-2 px-3 text-center whitespace-normal"
                     disabled={createStripeLoading}
                     onClick={handleCreateStripeInvoice}
                   >
@@ -432,23 +481,23 @@ export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({
                         type="button"
                         size="sm"
                         variant="default"
-                        className="w-full"
+                        className="w-full h-auto min-h-9 py-2 px-3 text-center whitespace-normal"
                         onClick={() => window.open(invoice.hosted_invoice_url!, '_blank')}
                       >
-                        <ExternalLink className="h-4 w-4 mr-2" />
-                        Open full invoice (pays remaining in full)
+                        <ExternalLink className="h-4 w-4 mr-2 shrink-0" />
+                        Open full invoice
                       </Button>
                     )}
                     <Button
                       type="button"
                       size="sm"
                       variant={hasHostedUrl ? 'outline' : 'default'}
-                      className="w-full"
+                      className="w-full h-auto min-h-9 py-2 px-3 text-center whitespace-normal"
                       disabled={sendInvoiceLoading || requestPaymentDisabled}
                       title={requestPaymentDisabled ? (requestPaymentDisabledReason ?? 'Customer email required to email invoice. Use hosted link instead.') : undefined}
                       onClick={handleRequestPayment}
                     >
-                      <Send className="h-4 w-4 mr-2" />
+                      <Send className="h-4 w-4 mr-2 shrink-0" />
                       {sendInvoiceLoading ? 'Sending…' : 'Request payment'}
                     </Button>
                   </>
@@ -457,11 +506,11 @@ export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="w-full"
+                  className="w-full h-auto min-h-9 py-2 px-3 text-center whitespace-normal"
                   disabled={copyLoading}
                   onClick={handleCopyPaymentLink}
                 >
-                  <Copy className="h-4 w-4 mr-2" />
+                  <Copy className="h-4 w-4 mr-2 shrink-0" />
                   {copyLoading ? 'Creating…' : 'Copy Checkout link'}
                 </Button>
               </div>
@@ -516,6 +565,73 @@ export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({
             </div>
           </CardContent>
         </Card>
+
+        {/* Cost breakdown — per-order: Order N — display name, cost lines, order total */}
+        {orders && orders.length > 0 && (
+          <Card className="mb-4">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Cost breakdown</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-0">
+              {orders.map((order: Order, index: number) => {
+                const base = getOrderBaseValue(order);
+                const permit = getOrderPermitCost(order);
+                const optionsTotalForOrder = getOrderAdditionalOptionsTotal(order);
+                const hasOptions = optionsTotalForOrder > 0 || (order.additional_options && order.additional_options.length > 0);
+                const displayName = getOrderDisplayName(order);
+                const productLineLabel = order.order_type === 'Renovation' ? 'Renovation' : 'Main product';
+                const permitFormName = order.permit_form_id
+                  ? (permitFormNameById[order.permit_form_id] ?? 'Permit')
+                  : 'Permit';
+                const orderTotal = getOrderTotal(order);
+                const orderId = getOrderDisplayId(order);
+                const typeLabel = order.order_type === 'Renovation' ? 'Renovation' : 'New Memorial';
+                const orderTitle = `${orderId} — ${typeLabel}: ${displayName}`;
+                return (
+                  <React.Fragment key={order.id}>
+                    {index > 0 && <div className="border-t my-4" role="separator" aria-hidden />}
+                    <div className="space-y-2">
+                      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {orderTitle}
+                      </h4>
+                      <div className="space-y-1.5 text-sm">
+                        <div className="flex justify-between items-baseline gap-2">
+                          <span className="text-muted-foreground">{productLineLabel}</span>
+                          <span className="tabular-nums">{formatCurrency(base)}</span>
+                        </div>
+                        {permit > 0 && (
+                          <div className="flex justify-between items-baseline gap-2">
+                            <span className="text-muted-foreground">{permitFormName}</span>
+                            <span className="tabular-nums">{formatCurrency(permit)}</span>
+                          </div>
+                        )}
+                        {hasOptions && (
+                          order.additional_options && order.additional_options.length > 0 ? (
+                            order.additional_options.map((opt) => (
+                              <div key={opt.id} className="flex justify-between items-baseline gap-2 pl-1">
+                                <span className="text-muted-foreground">{opt.name?.trim() || 'Option'}</span>
+                                <span className="tabular-nums">{formatCurrency(typeof opt.cost === 'number' ? opt.cost : parseFloat(String(opt.cost)) || 0)}</span>
+                              </div>
+                            ))
+                          ) : (
+                            <div className="flex justify-between items-baseline gap-2">
+                              <span className="text-muted-foreground">Additional options</span>
+                              <span className="tabular-nums">{formatCurrency(optionsTotalForOrder)}</span>
+                            </div>
+                          )
+                        )}
+                        <div className="flex justify-between items-baseline gap-2 pt-1.5 border-t border-border/60">
+                          <span className="font-medium text-foreground">Order total</span>
+                          <span className="tabular-nums font-medium">{formatCurrency(orderTotal)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </React.Fragment>
+                );
+              })}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Collect payment (partial) */}
         {invoice.stripe_invoice_id && hasRemaining && !isPaid && (
@@ -574,7 +690,7 @@ export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({
                 <Button
                   type="button"
                   size="sm"
-                  className="w-full"
+                  className="w-full h-auto min-h-9 py-2 px-3 text-center whitespace-normal"
                   disabled={collectLoading}
                   onClick={handleGenerateCheckoutLink}
                 >
@@ -715,6 +831,7 @@ export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({
             )}
           </CardContent>
         </Card>
+      </div>
       </div>
 
       <CreateOrderDrawer

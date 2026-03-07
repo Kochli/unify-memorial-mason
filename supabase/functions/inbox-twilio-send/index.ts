@@ -1,4 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.49.4';
+import { getUserFromRequest } from './auth.ts';
+import { decryptSecret } from './whatsappCrypto.ts';
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -12,217 +14,183 @@ interface SendMessageRequest {
   body_text: string;
 }
 
+function jsonResponse(body: Record<string, unknown>, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
 Deno.serve(async (req: Request): Promise<Response> => {
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 200, headers: corsHeaders });
   }
 
   if (req.method !== 'POST') {
-    return new Response('Method Not Allowed', {
-      status: 405,
-      headers: corsHeaders,
-    });
+    return jsonResponse({ error: 'Method not allowed' }, 405);
   }
 
-  try {
-    // Validate admin token (JWT is effectively OFF; we rely on this shared secret)
+  let userId: string | null = null;
+  const user = await getUserFromRequest(req);
+  if (user) {
+    userId = user.id;
+  } else {
     const adminToken = req.headers.get('x-admin-token') ?? req.headers.get('X-Admin-Token');
     const expectedToken = Deno.env.get('INBOX_ADMIN_TOKEN');
-
-    if (!expectedToken || !adminToken || adminToken !== expectedToken) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        {
-          status: 401,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        },
+    if (expectedToken && adminToken && adminToken === expectedToken) {
+      return jsonResponse(
+        { error: 'Use the app to send messages; connect WhatsApp in Profile and sign in.' },
+        403
       );
     }
+    return jsonResponse({ error: 'Unauthorized' }, 401);
+  }
 
-    const { conversation_id, body_text }: SendMessageRequest = await req.json();
+  let body: SendMessageRequest;
+  try {
+    body = await req.json();
+  } catch {
+    return jsonResponse({ error: 'Invalid JSON body' }, 400);
+  }
 
-    const trimmedBody = body_text?.trim?.() ?? '';
-    if (!conversation_id || typeof conversation_id !== 'string' || !trimmedBody) {
-      return new Response(
-        JSON.stringify({ error: 'conversation_id and non-empty body_text are required' }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        },
-      );
-    }
-
-    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-    if (!supabaseUrl || !serviceRoleKey) {
-      console.error('Supabase URL or SERVICE_ROLE_KEY missing');
-      return new Response(
-        JSON.stringify({ error: 'Server configuration error' }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        },
-      );
-    }
-
-    const supabase = createClient(supabaseUrl, serviceRoleKey);
-
-    // Load conversation (channel, primary_handle)
-    const { data: conversation, error: convError } = await supabase
-      .from('inbox_conversations')
-      .select('id, channel, primary_handle')
-      .eq('id', conversation_id)
-      .single();
-
-    if (convError || !conversation) {
-      console.error('Conversation not found or error loading conversation', convError);
-      return new Response(
-        JSON.stringify({ error: 'Conversation not found' }),
-        {
-          status: 404,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        },
-      );
-    }
-
-    const twilioAccountSid = Deno.env.get('TWILIO_ACCOUNT_SID');
-    const twilioAuthToken = Deno.env.get('TWILIO_AUTH_TOKEN');
-    const twilioPhoneNumber = Deno.env.get('TWILIO_PHONE_NUMBER');
-
-    if (!twilioAccountSid || !twilioAuthToken || !twilioPhoneNumber) {
-      console.error('Twilio credentials not configured (SID/Token/Number missing)');
-      return new Response(
-        JSON.stringify({ error: 'Twilio not configured' }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        },
-      );
-    }
-
-    // Determine Twilio From/To formatting based on channel
-    const toHandle: string = conversation.primary_handle;
-    const isWhatsApp = conversation.channel === 'whatsapp';
-
-    const fromNumber = isWhatsApp
-      ? `whatsapp:${twilioPhoneNumber}`
-      : twilioPhoneNumber;
-    const toNumber = isWhatsApp
-      ? `whatsapp:${toHandle}`
-      : toHandle;
-
-    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioAccountSid}/Messages.json`;
-
-    const body = new URLSearchParams({
-      From: fromNumber,
-      To: toNumber,
-      Body: trimmedBody,
-    });
-
-    const twilioResponse = await fetch(twilioUrl, {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${btoa(`${twilioAccountSid}:${twilioAuthToken}`)}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: body.toString(),
-    });
-
-    const sentAt = new Date().toISOString();
-
-    if (!twilioResponse.ok) {
-      const errorText = await twilioResponse.text();
-      console.error('Twilio API error', {
-        status: twilioResponse.status,
-        statusText: twilioResponse.statusText,
-        body: errorText,
-      });
-
-      // Insert failed message for audit trail
-      await supabase.from('inbox_messages').insert({
-        conversation_id,
-        channel: conversation.channel,
-        direction: 'outbound',
-        from_handle: 'team',
-        to_handle: conversation.primary_handle,
-        body_text: trimmedBody,
-        subject: null,
-        sent_at: sentAt,
-        status: 'failed',
-      });
-
-      return new Response(
-        JSON.stringify({ error: 'Failed to send message via Twilio' }),
-        {
-          status: 502,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        },
-      );
-    }
-
-    const twilioData = await twilioResponse.json().catch(() => ({}));
-
-    const { data: message, error: insertError } = await supabase
-      .from('inbox_messages')
-      .insert({
-        conversation_id,
-        channel: conversation.channel,
-        direction: 'outbound',
-        from_handle: 'team',
-        to_handle: conversation.primary_handle,
-        body_text: trimmedBody,
-        subject: null,
-        sent_at: sentAt,
-        status: 'sent',
-      })
-      .select()
-      .single();
-
-    if (insertError || !message) {
-      console.error('Failed to insert outbound inbox_message', insertError);
-      return new Response(
-        JSON.stringify({ error: 'Failed to record message in database' }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        },
-      );
-    }
-
-    const { error: updateError } = await supabase
-      .from('inbox_conversations')
-      .update({
-        last_message_at: sentAt,
-        last_message_preview: trimmedBody.substring(0, 120),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', conversation_id);
-
-    if (updateError) {
-      console.error('Failed to update inbox_conversations metadata', updateError);
-    }
-
-    return new Response(
-      JSON.stringify({
-        success: true,
-        message_id: message.id,
-        twilio_sid: (twilioData && (twilioData.sid as string | undefined)) ?? null,
-      }),
-      {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      },
-    );
-  } catch (error) {
-    console.error('inbox-twilio-send unexpected error', error);
-    return new Response(
-      JSON.stringify({ error: 'Unexpected error' }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      },
+  const conversation_id = body.conversation_id;
+  const trimmedBody = (body.body_text ?? '').trim();
+  if (!conversation_id || typeof conversation_id !== 'string' || !trimmedBody) {
+    return jsonResponse(
+      { error: 'conversation_id and non-empty body_text are required' },
+      400
     );
   }
-});
 
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  if (!supabaseUrl || !serviceRoleKey) {
+    return jsonResponse({ error: 'Server configuration error' }, 500);
+  }
+
+  const supabase = createClient(supabaseUrl, serviceRoleKey);
+
+  const { data: conversation, error: convError } = await supabase
+    .from('inbox_conversations')
+    .select('id, channel, primary_handle, user_id')
+    .eq('id', conversation_id)
+    .single();
+
+  if (convError || !conversation) {
+    return jsonResponse({ error: 'Conversation not found' }, 404);
+  }
+
+  if (conversation.user_id !== userId) {
+    return jsonResponse({ error: 'You can only send in your own conversations' }, 403);
+  }
+
+  const { data: connection, error: connError } = await supabase
+    .from('whatsapp_connections')
+    .select('id, twilio_account_sid, twilio_api_key_sid, twilio_api_key_secret_encrypted, whatsapp_from')
+    .eq('user_id', userId)
+    .eq('status', 'connected')
+    .limit(1)
+    .maybeSingle();
+
+  if (connError || !connection) {
+    return jsonResponse(
+      { error: 'Connect WhatsApp in Profile to send messages' },
+      403
+    );
+  }
+
+  let apiKeySecret: string;
+  try {
+    apiKeySecret = await decryptSecret(connection.twilio_api_key_secret_encrypted);
+  } catch (e) {
+    console.error('inbox-twilio-send: decrypt failed', e);
+    return jsonResponse({ error: 'Server error' }, 500);
+  }
+
+  const toHandle = conversation.primary_handle;
+  const isWhatsApp = conversation.channel === 'whatsapp';
+  const fromRaw = (connection.whatsapp_from ?? '').trim();
+  const fromNumber = isWhatsApp
+    ? (fromRaw.startsWith('whatsapp:') ? fromRaw : `whatsapp:${fromRaw}`)
+    : fromRaw.replace(/^whatsapp:/, '');
+  const toNumber = isWhatsApp
+    ? (toHandle.startsWith('whatsapp:') ? toHandle : `whatsapp:${toHandle}`)
+    : toHandle;
+
+  const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${connection.twilio_account_sid}/Messages.json`;
+  const twilioBody = new URLSearchParams({
+    From: fromNumber,
+    To: toNumber,
+    Body: trimmedBody,
+  });
+
+  const twilioResponse = await fetch(twilioUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${btoa(`${connection.twilio_api_key_sid}:${apiKeySecret}`)}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: twilioBody.toString(),
+  });
+
+  const sentAt = new Date().toISOString();
+
+  if (!twilioResponse.ok) {
+    const errorText = await twilioResponse.text();
+    console.error('Twilio API error', { status: twilioResponse.status, body: errorText });
+
+    await supabase.from('inbox_messages').insert({
+      conversation_id: conversation.id,
+      channel: conversation.channel,
+      direction: 'outbound',
+      from_handle: 'team',
+      to_handle: toHandle,
+      body_text: trimmedBody,
+      sent_at: sentAt,
+      status: 'failed',
+      user_id: userId,
+      whatsapp_connection_id: connection.id,
+    });
+
+    return jsonResponse({ error: 'Failed to send message via Twilio' }, 502);
+  }
+
+  const twilioData = await twilioResponse.json().catch(() => ({}));
+
+  const { data: message, error: insertError } = await supabase
+    .from('inbox_messages')
+    .insert({
+      conversation_id: conversation.id,
+      channel: conversation.channel,
+      direction: 'outbound',
+      from_handle: 'team',
+      to_handle: toHandle,
+      body_text: trimmedBody,
+      sent_at: sentAt,
+      status: 'sent',
+      user_id: userId,
+      whatsapp_connection_id: connection.id,
+    })
+    .select()
+    .single();
+
+  if (insertError || !message) {
+    console.error('Failed to insert outbound inbox_message', insertError);
+    return jsonResponse({ error: 'Failed to record message in database' }, 500);
+  }
+
+  await supabase
+    .from('inbox_conversations')
+    .update({
+      last_message_at: sentAt,
+      last_message_preview: trimmedBody.substring(0, 120),
+      updated_at: sentAt,
+    })
+    .eq('id', conversation_id);
+
+  return jsonResponse({
+    success: true,
+    message_id: message.id,
+    twilio_sid: (twilioData?.sid as string | undefined) ?? null,
+  }, 200);
+});

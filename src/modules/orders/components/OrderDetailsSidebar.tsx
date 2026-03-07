@@ -208,35 +208,36 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
   };
 
   return (
-    <div className="fixed right-0 top-0 h-full w-96 bg-background border-l shadow-lg z-50 overflow-y-auto">
-      <div className="p-6">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h2 className="text-xl font-semibold">Order Details</h2>
-            <p className="text-sm text-muted-foreground">{getOrderDisplayId(currentOrder)}</p>
-          </div>
-          <div className="flex gap-2">
-            {isEditing ? (
-              <>
-                <Button variant="ghost" size="sm" onClick={handleEditSave} disabled={isPending}>
-                  <Save className="h-4 w-4" />
-                </Button>
-                <Button variant="ghost" size="sm" onClick={handleEditCancel} disabled={isPending}>
-                  <XCircle className="h-4 w-4" />
-                </Button>
-              </>
-            ) : (
-              <Button variant="ghost" size="sm" onClick={handleEditStart}>
-                <Edit className="h-4 w-4" />
-              </Button>
-            )}
-            <Button variant="ghost" size="sm" onClick={onClose}>
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
+    <div className="fixed right-0 top-0 h-full w-96 bg-background border-l shadow-lg z-50 flex flex-col">
+      {/* Sticky header */}
+      <div className="sticky top-0 z-10 flex-shrink-0 flex items-center justify-between p-4 border-b bg-background">
+        <div>
+          <h2 className="text-xl font-semibold">Order Details</h2>
+          <p className="text-sm text-muted-foreground">{getOrderDisplayId(currentOrder)}</p>
         </div>
-
+        <div className="flex gap-2">
+          {isEditing ? (
+            <>
+              <Button variant="ghost" size="sm" onClick={handleEditSave} disabled={isPending}>
+                <Save className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleEditCancel} disabled={isPending}>
+                <XCircle className="h-4 w-4" />
+              </Button>
+            </>
+          ) : (
+            <Button variant="ghost" size="sm" onClick={handleEditStart}>
+              <Edit className="h-4 w-4" />
+            </Button>
+          )}
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+      {/* Scrollable body */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="p-6">
         {/* Priority Alert */}
         {currentOrder.priority === 'high' && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2">
@@ -759,6 +760,7 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
             Schedule Installation
           </Button>
         </div>
+      </div>
       </div>
     </div>
   );

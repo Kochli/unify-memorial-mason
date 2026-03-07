@@ -109,7 +109,7 @@ export const CustomersPage: React.FC = () => {
     }
 
     return (
-      <div className="rounded-md border">
+      <div className="rounded-md border overflow-x-auto min-w-0">
         <Table>
           <TableHeader>
             <TableRow>
@@ -152,10 +152,10 @@ export const CustomersPage: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-w-0">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">People</h1>
+          <h1 className="text-2xl font-bold tracking-tight">People</h1>
           <p className="text-sm text-slate-600 mt-1">Manage people records and contact details.</p>
         </div>
         <div className="flex gap-2">

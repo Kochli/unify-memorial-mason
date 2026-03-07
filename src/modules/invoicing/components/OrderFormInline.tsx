@@ -11,6 +11,8 @@ import { Button } from '@/shared/components/ui/button';
 import { useMemorialsList } from '@/modules/memorials/hooks/useMemorials';
 import { transformMemorialsFromDb } from '@/modules/memorials/utils/memorialTransform';
 import type { UIMemorial } from '@/modules/memorials/utils/memorialTransform';
+import { usePermitForms } from '@/modules/permitForms/hooks/usePermitForms';
+import { PermitFormPicker } from '@/modules/orders/components/PermitFormPicker';
 import { X, Plus, Trash2 } from 'lucide-react';
 import { toMoneyNumber } from '@/modules/orders/utils/numberParsing';
 
@@ -36,6 +38,7 @@ export const OrderFormInline: React.FC<OrderFormInlineProps> = ({
   onDimensionsChange,
 }) => {
   const { data: memorialsData } = useMemorialsList();
+  const { data: permitFormsData } = usePermitForms();
   
   const products = useMemo(() => {
     if (!memorialsData) return [];
@@ -56,6 +59,7 @@ export const OrderFormInline: React.FC<OrderFormInlineProps> = ({
       material: order.data.material || '',
       color: order.data.color || '',
       value: order.data.value ?? null,
+      permit_form_id: order.data.permit_form_id ?? null,
       permit_cost: order.data.permit_cost ?? null,
       renovation_service_description: order.data.renovation_service_description ?? null,
       renovation_service_cost: order.data.renovation_service_cost ?? null,
@@ -374,8 +378,26 @@ export const OrderFormInline: React.FC<OrderFormInlineProps> = ({
           </>
         )}
 
-        {/* Permit Cost - Visible for both order types */}
+        {/* Permit form & cost - Visible for both order types (matches Orders CreateOrderDrawer) */}
         <div className="space-y-4">
+          <FormField
+            control={form.control}
+            name="permit_form_id"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Permit form</FormLabel>
+                <FormControl>
+                  <PermitFormPicker
+                    value={field.value}
+                    onChange={field.onChange}
+                    permitForms={permitFormsData ?? []}
+                    disabled={false}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
           <FormField
             control={form.control}
             name="permit_cost"

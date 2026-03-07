@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { TableCell, TableRow } from "@/shared/components/ui/table";
 import { Button } from "@/shared/components/ui/button";
 import { Badge } from "@/shared/components/ui/badge";
@@ -10,34 +11,34 @@ import { DeleteOrderDialog } from '@/modules/orders/components/DeleteOrderDialog
 import type { Order } from '@/modules/orders/types/orders.types';
 import { getOrderTotalFormatted, getOrderTotal } from '@/modules/orders/utils/orderCalculations';
 import { getOrderDisplayIdShort } from '@/modules/orders/utils/orderDisplayId';
+import type { Invoice } from '../types/invoicing.types';
+import type { CreateStripeInvoiceResponse } from '../api/stripe.api';
 import { useUpdateInvoice } from '../hooks/useInvoices';
+import { ensureStripeInvoice } from '../utils/ensureStripeInvoice';
+import { fetchInvoice } from '../api/invoicing.api';
 
 interface ExpandedInvoiceOrdersProps {
   invoiceId: string;
+  /** When Stripe invoice is auto-created, call with (invoiceId, data) so parent can merge into selectedInvoice */
+  onStripeInvoiceCreated?: (invoiceId: string, data: CreateStripeInvoiceResponse) => void;
 }
 
 /**
- * Recalculate and update invoice amount based on linked orders
- * @param invoiceId - The invoice ID to update
- * @param orders - Array of orders linked to the invoice (already fetched)
- * @param updateInvoice - The invoice update mutation function
+ * Recalculate and update invoice amount based on linked orders.
+ * Returns the updated invoice or null on error.
  */
 async function recalculateInvoiceAmount(
   invoiceId: string,
   orders: Order[],
-  updateInvoice: (params: { id: string; updates: { amount: number } }) => Promise<any>
-) {
+  updateInvoice: (params: { id: string; updates: { amount: number } }) => Promise<Invoice>
+): Promise<Invoice | null> {
   try {
-    // Calculate total: sum of all order totals
-    const newAmount = orders.reduce((sum, order) => {
-      return sum + getOrderTotal(order);
-    }, 0);
-    
-    // Update invoice with new amount
-    await updateInvoice({ id: invoiceId, updates: { amount: newAmount } });
+    const newAmount = orders.reduce((sum, order) => sum + getOrderTotal(order), 0);
+    const updated = await updateInvoice({ id: invoiceId, updates: { amount: newAmount } });
+    return updated ?? null;
   } catch (error) {
     console.error('Failed to recalculate invoice amount:', error);
-    // Don't throw - this is a background update, don't block the UI
+    return null;
   }
 }
 
@@ -48,25 +49,41 @@ export const ExpandedInvoiceOrders: React.FC<ExpandedInvoiceOrdersProps> = ({ in
   const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   
+  const queryClient = useQueryClient();
   const { data: orders, isLoading, isError, refetch: refetchOrders } = useOrdersByInvoice(invoiceId);
   const { mutateAsync: updateInvoiceAsync } = useUpdateInvoice();
   
-  // Recalculate invoice amount when orders change
-  // Use a ref to track the last orders total to avoid unnecessary recalculations
+  // Recalculate invoice amount when orders change; then ensure Stripe invoice exists if amount > 0
   const lastOrdersTotalRef = useRef<number | null>(null);
   
   useEffect(() => {
-    if (invoiceId && orders !== undefined) {
-      // Calculate current total (0 if no orders)
-      const currentTotal = orders.reduce((sum, order) => sum + getOrderTotal(order), 0);
-      
-      // Only recalculate if total has changed (or first time)
-      if (lastOrdersTotalRef.current === null || currentTotal !== lastOrdersTotalRef.current) {
-        lastOrdersTotalRef.current = currentTotal;
-        recalculateInvoiceAmount(invoiceId, orders, updateInvoiceAsync);
+    if (!invoiceId || orders === undefined) return;
+    const currentTotal = orders.reduce((sum, order) => sum + getOrderTotal(order), 0);
+    if (lastOrdersTotalRef.current !== null && currentTotal === lastOrdersTotalRef.current) return;
+
+    lastOrdersTotalRef.current = currentTotal;
+    (async () => {
+      const updatedInvoice = await recalculateInvoiceAmount(invoiceId, orders, updateInvoiceAsync);
+      if (currentTotal > 0 && updatedInvoice) {
+        try {
+          await ensureStripeInvoice(
+            {
+              id: updatedInvoice.id,
+              amount: updatedInvoice.amount,
+              stripe_invoice_id: updatedInvoice.stripe_invoice_id ?? null,
+              hasOrders: orders.length > 0,
+            },
+            {
+              queryClient,
+              onSuccess: (data) => onStripeInvoiceCreated?.(invoiceId, data),
+            }
+          );
+        } catch {
+          // Logged in ensureStripeInvoice; allow retry via Link
+        }
       }
-    }
-  }, [orders, invoiceId, updateInvoiceAsync]);
+    })();
+  }, [orders, invoiceId, updateInvoiceAsync, queryClient]);
 
   // Removed formatCurrency - using getOrderTotalFormatted instead for derived totals
 

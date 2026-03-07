@@ -10,6 +10,7 @@ import {
 } from '@/shared/components/ui/dropdown-menu';
 import { LogOut, Activity as ActivityIcon } from 'lucide-react';
 import { GmailConnectionStatus } from '@/modules/inbox/components/GmailConnectionStatus';
+import { WhatsAppConnectionStatus } from '@/modules/inbox/components/WhatsAppConnectionStatus';
 
 export const DashboardLayout: React.FC = () => {
   const navigate = useNavigate();
@@ -25,6 +26,7 @@ export const DashboardLayout: React.FC = () => {
         <h1 className="ml-2 sm:ml-4 text-sm sm:text-lg font-semibold truncate">Memorial Mason Management</h1>
         <div className="flex items-center gap-2 shrink-0">
           <GmailConnectionStatus />
+          <WhatsAppConnectionStatus />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm" className="shrink-0">
@@ -54,7 +56,7 @@ export const DashboardLayout: React.FC = () => {
           </DropdownMenu>
         </div>
       </header>
-      <main className="flex-1 p-3 sm:p-6 bg-slate-50 overflow-x-hidden">
+      <main className="flex-1 min-w-0 p-3 sm:p-6 bg-slate-50 overflow-x-hidden">
         <Outlet />
       </main>
     </div>

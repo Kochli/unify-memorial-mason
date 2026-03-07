@@ -56,6 +56,25 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const supabase = createClient(supabaseUrl, serviceRoleKey);
+
+  // Route WhatsApp/SMS to owner via whatsapp_connections (AccountSid + To). If no match, return 200 and do not create conversation.
+  const toNormalized = to.trim();
+  const { data: connection } = await supabase
+    .from('whatsapp_connections')
+    .select('id, user_id')
+    .eq('twilio_account_sid', accountSid)
+    .eq('whatsapp_from', toNormalized)
+    .eq('status', 'connected')
+    .limit(1)
+    .maybeSingle();
+
+  const ownerUserId = connection?.user_id ?? null;
+  const connectionId = connection?.id ?? null;
+
+  if (!ownerUserId) {
+    return new Response(twimlEmpty, { status: 200, headers: twimlHeaders });
+  }
+
   const externalMessageId = `twilio:${messageSid}`;
 
   const { data: existingMsg } = await supabase
@@ -77,7 +96,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const { data: existingConv } = await supabase
     .from('inbox_conversations')
-    .select('id, last_message_at, unread_count, status')
+    .select('id, last_message_at, unread_count, status, user_id')
     .eq('channel', channel)
     .eq('external_thread_id', externalThreadId)
     .limit(1)
@@ -85,6 +104,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   if (existingConv) {
     conversationId = existingConv.id;
+    if (!existingConv.user_id) {
+      await supabase
+        .from('inbox_conversations')
+        .update({ user_id: ownerUserId, updated_at: new Date().toISOString() })
+        .eq('id', conversationId);
+    }
   } else {
     const sentAt = new Date().toISOString();
     const preview = body.slice(0, 120);
@@ -92,13 +117,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
       .from('inbox_conversations')
       .insert({
         channel,
-        primary_handle: from.trim(), // normalized (+E164)
+        primary_handle: from.trim(),
         external_thread_id: externalThreadId,
         subject: null,
         status: 'open',
         unread_count: 1,
         last_message_at: sentAt,
         last_message_preview: preview,
+        user_id: ownerUserId,
       })
       .select('id')
       .single();
@@ -123,18 +149,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
     },
   };
 
-  const { error: insertErr } = await supabase.from('inbox_messages').insert({
+  const msgPayload: Record<string, unknown> = {
     conversation_id: conversationId,
-    channel, // sms or whatsapp
+    channel,
     direction: 'inbound',
-    from_handle: from.trim(), // normalized
-    to_handle: to.trim(),     // normalized
+    from_handle: from.trim(),
+    to_handle: to.trim(),
     body_text: body,
     sent_at: sentAt,
-    status: 'sent', // kept as-is from your current implementation
+    status: 'sent',
     external_message_id: externalMessageId,
     meta,
-  });
+    user_id: ownerUserId,
+  };
+  if (connectionId) msgPayload.whatsapp_connection_id = connectionId;
+  const { error: insertErr } = await supabase.from('inbox_messages').insert(msgPayload);
 
   if (insertErr) {
     console.error('twilio-sms-webhook: failed to insert message', insertErr);

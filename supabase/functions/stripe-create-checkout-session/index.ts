@@ -21,13 +21,21 @@ interface OrderRow {
   additional_options_total: number | null;
 }
 
+/** Coerce to number; Supabase/PostgREST may return numeric columns as strings. Avoids string concatenation in totals. */
+function toNum(v: number | string | null | undefined): number {
+  if (v == null) return 0;
+  const n = typeof v === 'string' ? parseFloat(v) : Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function getOrderTotal(order: OrderRow): number {
   const base = order.order_type === 'Renovation'
-    ? (order.renovation_service_cost ?? 0)
-    : (order.value ?? 0);
-  const permit = order.permit_cost ?? 0;
-  const options = order.additional_options_total ?? 0;
-  return base + permit + options;
+    ? toNum(order.renovation_service_cost)
+    : toNum(order.value);
+  const permit = toNum(order.permit_cost);
+  const options = toNum(order.additional_options_total);
+  const total = base + permit + options;
+  return Number.isFinite(total) ? total : 0;
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {

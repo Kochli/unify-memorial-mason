@@ -20,15 +20,17 @@ export async function fetchOrder(id: string) {
     .single();
   
   if (error) throw error;
-  // Calculate additional_options_total from joined options if not present
+  // Calculate additional_options_total from joined options (single-order fetch uses orders table, not the view)
   if (data) {
     const normalizedOrder = normalizeOrder(data);
     if (normalizedOrder.order_additional_options && normalizedOrder.order_additional_options.length > 0) {
       const optionsTotal = normalizedOrder.order_additional_options.reduce((sum, opt) => {
         const cost = typeof opt.cost === 'string' ? parseFloat(opt.cost) : (opt.cost ?? 0);
-        return sum + (isNaN(cost) ? 0 : cost);
+        return sum + (Number.isFinite(cost) ? cost : 0);
       }, 0);
-      normalizedOrder.additional_options_total = optionsTotal;
+      normalizedOrder.additional_options_total = Number.isFinite(optionsTotal) ? optionsTotal : 0;
+    } else {
+      normalizedOrder.additional_options_total = 0;
     }
     return normalizedOrder;
   }
@@ -128,19 +130,29 @@ export async function fetchOrdersByPersonId(personId: string) {
 }
 
 /**
- * Fetch all orders associated with a specific invoice
+ * Fetch all orders associated with a specific invoice (includes additional_options for cost breakdown)
  * @param invoiceId - UUID of the invoice
  * @returns Array of Order objects ordered by creation date (newest first)
  */
 export async function fetchOrdersByInvoice(invoiceId: string) {
   const { data, error } = await supabase
     .from('orders_with_options_total')
-    .select('*, customers(id, first_name, last_name)')
+    .select('*, customers(id, first_name, last_name), order_additional_options(id, order_id, name, description, cost, created_at, updated_at)')
     .eq('invoice_id', invoiceId)
     .order('created_at', { ascending: false });
   
   if (error) throw error;
-  return (data || []).map(normalizeOrder);
+  return (data || []).map((row: Record<string, unknown>) => {
+    const normalized = normalizeOrder(row);
+    const opts = row.order_additional_options as Array<{ id: string; order_id: string; name: string; description: string | null; cost: number; created_at: string; updated_at: string }> | undefined;
+    const additional_options = Array.isArray(opts)
+      ? opts.map((o) => ({
+          ...o,
+          cost: typeof o.cost === 'string' ? parseFloat(o.cost) : (o.cost ?? 0),
+        }))
+      : undefined;
+    return { ...normalized, ...(additional_options && { additional_options }) } as Order;
+  });
 }
 
 export async function createOrder(order: OrderInsert) {

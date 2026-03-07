@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { TableCell } from '@/shared/components/ui/table';
 import { Button } from '@/shared/components/ui/button';
 import { Badge } from '@/shared/components/ui/badge';
@@ -6,6 +7,8 @@ import { ChevronRight, ChevronDown, Loader2 } from 'lucide-react';
 import { CustomerDetailsPopover } from '@/shared/components/customer/CustomerDetailsPopover';
 import { useToast } from '@/shared/hooks/use-toast';
 import { createStripeInvoice } from '../api/stripe.api';
+import { invoicesKeys } from '../hooks/useInvoices';
+import type { Invoice } from '../types/invoicing.types';
 import type { UIInvoice } from '../utils/invoiceTransform';
 import { formatPence } from '../utils/invoiceAmounts';
 
@@ -18,6 +21,7 @@ function StripePaymentLinkCell({
 }) {
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const isPaid =
     invoice.derivedStatus === 'paid' ||
     invoice.stripeStatus === 'paid' ||
@@ -28,6 +32,24 @@ function StripePaymentLinkCell({
     setLoading(true);
     try {
       const data = await createStripeInvoice(invoice.id);
+      // Refresh table so Full + Partial buttons appear immediately (optimistic + invalidation)
+      queryClient.setQueryData(invoicesKeys.all, (old: Invoice[] | undefined) => {
+        if (!old) return old;
+        return old.map((inv) =>
+          inv.id === invoice.id
+            ? {
+                ...inv,
+                stripe_invoice_id: data.stripe_invoice_id,
+                hosted_invoice_url: data.hosted_invoice_url ?? inv.hosted_invoice_url,
+                stripe_invoice_status: (data.stripe_invoice_status ?? inv.stripe_invoice_status) ?? null,
+                amount_paid: data.amount_paid ?? inv.amount_paid,
+                amount_remaining: data.amount_remaining ?? inv.amount_remaining,
+              }
+            : inv
+        );
+      });
+      queryClient.invalidateQueries({ queryKey: invoicesKeys.all });
+      queryClient.invalidateQueries({ queryKey: invoicesKeys.detail(invoice.id) });
       const url = data.hosted_invoice_url;
       if (url) {
         window.open(url, '_blank', 'noopener,noreferrer');
@@ -53,26 +75,32 @@ function StripePaymentLinkCell({
     return <span className="text-sm text-green-600 font-medium">Paid</span>;
   }
 
-  const hostedUrl = invoice.hostedInvoiceUrl ?? undefined;
+  // Row data: UIInvoice from transform (stripe_invoice_id → stripeInvoiceId, hosted_invoice_url → hostedInvoiceUrl)
+  const hasHostedUrl = !!invoice.hostedInvoiceUrl?.trim();
+  const hasStripeInvoiceId = !!invoice.stripeInvoiceId?.trim();
+  // Show Full + Partial when we have a Stripe invoice (id or hosted URL); Partial visible as soon as Full is
+  const showFullAndPartial = hasStripeInvoiceId || hasHostedUrl;
 
-  if (hostedUrl) {
+  if (showFullAndPartial) {
     return (
-      <div className="flex gap-1">
+      <div className="flex flex-wrap gap-1">
+        {hasHostedUrl && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 shrink-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              window.open(invoice.hostedInvoiceUrl!, '_blank', 'noopener,noreferrer');
+            }}
+          >
+            Full
+          </Button>
+        )}
         <Button
           variant="outline"
           size="sm"
-          className="h-7"
-          onClick={(e) => {
-            e.stopPropagation();
-            window.open(hostedUrl, '_blank', 'noopener,noreferrer');
-          }}
-        >
-          Full
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7"
+          className="h-7 shrink-0"
           onClick={(e) => {
             e.stopPropagation();
             onFocusCollectPayment?.(invoice.id);
@@ -84,6 +112,7 @@ function StripePaymentLinkCell({
     );
   }
 
+  // No Stripe invoice yet (e.g. 0 amount or auto-creation not run): show Link to create manually
   return (
     <Button
       variant="outline"
@@ -308,11 +337,11 @@ export const invoiceColumnDefinitions: InvoiceColumnDefinition[] = [
   {
     id: 'stripePaymentLink',
     label: 'Stripe payment link',
-    defaultWidth: 140,
+    defaultWidth: 220,
     sortable: false,
     renderHeader: () => <div>Stripe payment link</div>,
     renderCell: (invoice, props) => (
-      <TableCell>
+      <TableCell className="overflow-visible" style={{ overflow: 'visible' }}>
         <StripePaymentLinkCell
           invoice={invoice}
           onFocusCollectPayment={props?.onFocusCollectPayment}

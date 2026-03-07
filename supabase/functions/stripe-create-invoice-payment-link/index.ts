@@ -71,10 +71,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const supabase = createClient(supabaseUrl, serviceRoleKey);
     const stripe = new Stripe(stripeSecret);
 
-    // Load Mason invoice
+    // Load Mason invoice (amount in pounds)
     const { data: invoice, error: invError } = await supabase
       .from('invoices')
-      .select('id, user_id, invoice_number, stripe_invoice_id')
+      .select('id, user_id, invoice_number, amount, stripe_invoice_id')
       .eq('id', invoiceId)
       .single();
 
@@ -86,6 +86,66 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     const stripeInvoiceId = invoice.stripe_invoice_id;
+
+    // Load linked orders with cost fields (view has additional_options_total)
+    const { data: ordersForBreakdown = [] } = await supabase
+      .from('orders_with_options_total')
+      .select('id, order_number, order_type, sku, material, color, renovation_service_description, value, renovation_service_cost, permit_cost, additional_options_total')
+      .eq('invoice_id', invoiceId)
+      .order('created_at', { ascending: true });
+
+    const formatOrderId = (order: { order_number?: number | null }) =>
+      order.order_number != null
+        ? `ORD-${String(order.order_number).padStart(6, '0')}`
+        : '';
+
+    const toNum = (v: unknown): number => {
+      if (v == null) return 0;
+      const n = typeof v === 'string' ? parseFloat(v) : Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    // Build cost breakdown (label, amount in pence) — same structure as InvoiceDetailSidebar
+    interface BreakdownItem {
+      label: string;
+      amountPence: number;
+    }
+    const breakdown: BreakdownItem[] = [];
+    for (const o of ordersForBreakdown as Record<string, unknown>[]) {
+      const orderIdStr = formatOrderId(o as { order_number?: number | null });
+      const orderType = (o.order_type as string) || '';
+      const basePounds = orderType === 'Renovation' ? toNum(o.renovation_service_cost) : toNum(o.value);
+      const permitPounds = toNum(o.permit_cost);
+      const optionsPounds = toNum(o.additional_options_total);
+      const basePence = Math.round(basePounds * 100);
+      const permitPence = Math.round(permitPounds * 100);
+      const optionsPence = Math.round(optionsPounds * 100);
+      const prefix = orderIdStr ? `${orderIdStr} ` : '';
+      if (basePence > 0) breakdown.push({ label: `${prefix}Main product`, amountPence: basePence });
+      if (permitPence > 0) breakdown.push({ label: `${prefix}Permit`, amountPence: permitPence });
+      if (optionsPence > 0) breakdown.push({ label: `${prefix}Additional options`, amountPence: optionsPence });
+    }
+
+    const totalBreakdownPence = breakdown.reduce((s, i) => s + i.amountPence, 0);
+
+    // Order IDs and description text for metadata / single-line fallback
+    const orderIdList: string[] = [];
+    const orderLines = (ordersForBreakdown as Record<string, unknown>[]).map((o: Record<string, unknown>) => {
+      const idStr = formatOrderId(o as { order_number?: number | null });
+      if (idStr) orderIdList.push(idStr);
+      const orderType = (o.order_type as string) || '';
+      const name =
+        orderType === 'Renovation'
+          ? ((o.renovation_service_description as string)?.trim() || 'Renovation')
+          : [o.material, o.color].filter(Boolean).join(' ').trim() || (o.sku as string)?.trim() || 'New Memorial';
+      const typeLabel = orderType === 'Renovation' ? 'Renovation' : 'New Memorial';
+      return idStr ? `${idStr} ${typeLabel}: ${name}` : `${typeLabel}: ${name}`;
+    });
+    const orderDetail =
+      orderLines.length > 0
+        ? `Orders: ${orderLines.join('; ')}`.slice(0, 500)
+        : `Invoice ${invoice.invoice_number}`;
+    const orderSummaryMeta = orderIdList.length > 0 ? orderIdList.join(', ') : invoice.invoice_number;
 
     // Retrieve Stripe invoice
     const stripeInvoice = await stripe.invoices.retrieve(stripeInvoiceId, {
@@ -117,27 +177,99 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return jsonResponse({ error: 'Stripe invoice has no customer attached' }, 500);
     }
 
-    const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
-      customer: customerId,
-      line_items: [
+    const paymentIntentDescription =
+      orderIdList.length > 0
+        ? `Partial payment for ${invoice.invoice_number} (${orderIdList.join(', ')})`
+        : `Partial payment for ${invoice.invoice_number}`;
+
+    // Prorate breakdown so line items sum to exact partial amount (Stripe charges sum of line items)
+    let lineItems: Stripe.Checkout.SessionCreateParams.LineItem[];
+    if (breakdown.length === 0 || totalBreakdownPence <= 0) {
+      lineItems = [
         {
           price_data: {
             currency: stripeInvoice.currency,
             product_data: {
-              name: `Invoice ${invoice.invoice_number} partial payment`,
+              name: `Partial payment for Invoice ${invoice.invoice_number}`,
+              description: orderDetail,
             },
             unit_amount: amount,
           },
           quantity: 1,
         },
-      ],
+      ];
+    } else {
+      const ratio = amount / totalBreakdownPence;
+      const prorated: number[] = breakdown.map((i) => Math.max(0, Math.floor(i.amountPence * ratio)));
+      let sum = prorated.reduce((a, b) => a + b, 0);
+      const diff = amount - sum;
+      if (diff !== 0 && prorated.length > 0) {
+        prorated[prorated.length - 1] += diff;
+      }
+      const withAmounts = breakdown
+        .map((item, i) => ({ label: item.label, unitAmount: prorated[i] }))
+        .filter((x) => x.unitAmount >= 1);
+      if (withAmounts.length === 0) {
+        lineItems = [
+          {
+            price_data: {
+              currency: stripeInvoice.currency,
+              product_data: {
+                name: `Partial payment for Invoice ${invoice.invoice_number}`,
+                description: orderDetail,
+              },
+              unit_amount: amount,
+            },
+            quantity: 1,
+          },
+        ];
+      } else {
+        const lineSum = withAmounts.reduce((s, x) => s + x.unitAmount, 0);
+        const adjust = amount - lineSum;
+        withAmounts[withAmounts.length - 1].unitAmount += adjust;
+        if (withAmounts[withAmounts.length - 1].unitAmount < 1) {
+          lineItems = [
+            {
+              price_data: {
+                currency: stripeInvoice.currency,
+                product_data: {
+                  name: `Partial payment for Invoice ${invoice.invoice_number}`,
+                  description: orderDetail,
+                },
+                unit_amount: amount,
+              },
+              quantity: 1,
+            },
+          ];
+        } else {
+          lineItems = withAmounts.map((item) => ({
+            price_data: {
+              currency: stripeInvoice.currency,
+              product_data: {
+                name: `${item.label} (partial)`,
+                description: `Invoice ${invoice.invoice_number}`,
+              },
+              unit_amount: item.unitAmount,
+            },
+            quantity: 1,
+          })) as Stripe.Checkout.SessionCreateParams.LineItem[];
+        }
+      }
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      customer: customerId,
+      line_items: lineItems,
       payment_intent_data: {
+        description: paymentIntentDescription.slice(0, 500),
         metadata: {
           mason_invoice_id: invoice.id,
           stripe_invoice_id: stripeInvoiceId,
           payment_kind: 'partial',
           app_user_id: invoice.user_id ?? '',
+          invoice_number: invoice.invoice_number ?? '',
+          order_summary: orderSummaryMeta.slice(0, 500),
         },
       },
       success_url: `${appUrl}/dashboard/invoicing?invoice=${invoice.id}&pay=success`,
@@ -146,6 +278,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
         mason_invoice_id: invoice.id,
         stripe_invoice_id: stripeInvoiceId,
         payment_kind: 'partial',
+        invoice_number: invoice.invoice_number ?? '',
+        order_summary: orderSummaryMeta.slice(0, 500),
+      },
+      custom_text: {
+        submit: {
+          message: 'This is a partial payment for the invoice above.',
+        },
       },
     });
 

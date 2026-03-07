@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/components/ui/tabs";
@@ -14,7 +14,7 @@ import { transformOrdersForUI, type UIOrder } from "../utils/orderTransform";
 import type { Order } from "../types/orders.types";
 import { ColumnsDialog } from '@/shared/tableViewPresets/components/ColumnsDialog';
 import { usePresetsByModule } from '@/shared/tableViewPresets/hooks/useTableViewPresets';
-import { applyPresetToState, getDefaultState } from '@/shared/tableViewPresets/utils/columnState';
+import { applyPresetToState, getDefaultState, extractStateToConfig } from '@/shared/tableViewPresets/utils/columnState';
 import { getColumnDefinitions } from '@/shared/tableViewPresets/config/defaultColumns';
 import type { ColumnState } from '@/shared/tableViewPresets/types/tableViewPresets.types';
 
@@ -30,20 +30,54 @@ export const OrdersPage: React.FC = () => {
   const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
   const [columnsDialogOpen, setColumnsDialogOpen] = useState(false);
   const [columnState, setColumnState] = useState<ColumnState>(() => getDefaultState('orders'));
+  const columnStateInitializedRef = useRef(false);
+  const loadedFromStorageRef = useRef(false);
 
   const { data: ordersData, isLoading, error } = useOrdersList();
   const { data: presets } = usePresetsByModule('orders');
 
-  // Load default preset on mount
+  const STORAGE_KEY = 'orders.columns.v1';
+
+  // Load column state on mount: prefer localStorage (user's last session), else default preset
   useEffect(() => {
-    if (presets) {
-      const defaultPreset = presets.find(p => p.is_default);
-      if (defaultPreset) {
-        const newState = applyPresetToState(defaultPreset.config, 'orders');
-        setColumnState(newState);
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved) as { version?: number; columns?: { visibility?: Record<string, boolean>; order?: string[]; widths?: Record<string, number> } };
+        if (parsed?.columns?.visibility && Array.isArray(parsed?.columns?.order)) {
+          const config = { version: parsed.version ?? 1, columns: parsed.columns };
+          const newState = applyPresetToState(config, 'orders');
+          setColumnState(newState);
+          loadedFromStorageRef.current = true;
+        }
       }
+    } catch {
+      // Ignore parse errors or invalid data
+    }
+    columnStateInitializedRef.current = true;
+  }, []);
+
+  // Load default preset when presets are available, only if we did not restore from localStorage
+  useEffect(() => {
+    if (!presets) return;
+    if (loadedFromStorageRef.current) return;
+    const defaultPreset = presets.find(p => p.is_default);
+    if (defaultPreset) {
+      const newState = applyPresetToState(defaultPreset.config, 'orders');
+      setColumnState(newState);
     }
   }, [presets]);
+
+  // Persist column state to localStorage when it changes (after initial load)
+  useEffect(() => {
+    if (!columnStateInitializedRef.current) return;
+    try {
+      const config = extractStateToConfig(columnState);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+    } catch {
+      // Ignore persistence errors
+    }
+  }, [columnState]);
 
   // Transform orders from DB format to UI format
   const uiOrders = useMemo(() => {
@@ -122,10 +156,10 @@ export const OrdersPage: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-w-0">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold">Order Management</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Order Management</h1>
           <p className="text-sm text-slate-600 mt-1">
             Track and manage all memorial orders
           </p>
@@ -242,6 +276,7 @@ export const OrdersPage: React.FC = () => {
               {isLoading ? (
                 <div className="text-center py-8 text-slate-600">Loading orders...</div>
               ) : (
+                <div className="overflow-x-auto min-w-0">
                 <SortableOrdersTable 
                   orders={filteredOrders} 
                   onViewOrder={(order) => {
@@ -253,11 +288,21 @@ export const OrdersPage: React.FC = () => {
                   columnState={columnState}
                   onColumnStateChange={setColumnState}
                 />
+                </div>
               )}
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Backdrop: close sidebar when clicking outside */}
+      {selectedOrder && (
+        <div
+          className="fixed inset-0 z-40 bg-black/10"
+          onClick={() => setSelectedOrder(null)}
+          aria-hidden
+        />
+      )}
 
       {/* Order Details Sidebar */}
       <OrderDetailsSidebar 

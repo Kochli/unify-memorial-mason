@@ -66,9 +66,12 @@ export function normalizeOrder(order: RawOrder): Order {
       ? (typeof order.permit_cost === 'string' ? parseFloat(order.permit_cost) : order.permit_cost)
       : null,
     renovation_service_cost: toNumberOrNull(order.renovation_service_cost),
-    additional_options_total: order.additional_options_total !== null && order.additional_options_total !== undefined
-      ? (typeof order.additional_options_total === 'string' ? parseFloat(order.additional_options_total) : order.additional_options_total)
-      : null,
+    // additional_options_total: treat NaN as 0 so order totals never break
+    additional_options_total: (() => {
+      if (order.additional_options_total == null) return null;
+      const v = typeof order.additional_options_total === 'string' ? parseFloat(order.additional_options_total) : order.additional_options_total;
+      return Number.isFinite(v) ? v : 0;
+    })(),
     // Normalize other numeric fields that might come as strings
     latitude: toNumberOrNull(order.latitude),
     longitude: toNumberOrNull(order.longitude),

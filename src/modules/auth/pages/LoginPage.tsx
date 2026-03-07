@@ -21,7 +21,7 @@ export function LoginPage() {
     try {
       const { error: err } = await supabase.auth.signInWithPassword({ email, password });
       if (err) throw err;
-      navigate('/dashboard', { replace: true });
+      navigate('/dashboard/inbox', { replace: true });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
@@ -35,7 +35,7 @@ export function LoginPage() {
     try {
       const { error: err } = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo: `${appUrl}/auth/callback` },
+        options: { redirectTo: `${appUrl}` },
       });
       if (err) throw err;
       // Redirect is handled by Supabase
