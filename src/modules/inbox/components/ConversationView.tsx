@@ -1,35 +1,47 @@
 import React, { useState, useRef } from 'react';
-import { Card, CardContent } from "@/shared/components/ui/card";
 import { Mail } from 'lucide-react';
 import { useConversation } from "@/modules/inbox/hooks/useInboxConversations";
 import { useMessagesByConversation } from "@/modules/inbox/hooks/useInboxMessages";
 import { useCustomer } from '@/modules/customers/hooks/useCustomers';
+import { useOrdersByPersonId } from '@/modules/orders/hooks/useOrders';
+import { getOrderDisplayId } from '@/modules/orders/utils/orderDisplayId';
 import { LinkConversationModal } from './LinkConversationModal';
 import { ConversationHeader } from './ConversationHeader';
 import { ConversationThread } from './ConversationThread';
 
-interface ConversationViewProps {
-  conversationId: string | null;
+const HEADER_ORDERS_MAX = 5;
+function formatOrderIdsForHeader(orderIds: string[], max: number = HEADER_ORDERS_MAX): string {
+  if (orderIds.length === 0) return '';
+  const show = orderIds.slice(0, max);
+  const suffix = orderIds.length > max ? ', ...' : '';
+  return show.join(', ') + suffix;
 }
 
-export const ConversationView: React.FC<ConversationViewProps> = ({ conversationId }) => {
+interface ConversationViewProps {
+  conversationId: string | null;
+  onReplyChannelChange?: (channel: 'email' | 'sms' | 'whatsapp') => void;
+}
+
+export const ConversationView: React.FC<ConversationViewProps> = ({
+  conversationId,
+  onReplyChannelChange,
+}) => {
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   const { data: conversation } = useConversation(conversationId);
   const { data: messages = [] } = useMessagesByConversation(conversationId);
   const { data: person } = useCustomer(conversation?.person_id ?? '');
+  const { data: personOrders = [] } = useOrdersByPersonId(conversation?.person_id ?? '');
 
   if (!conversationId || !conversation) {
     return (
-      <Card className="h-full">
-        <CardContent className="h-full flex items-center justify-center">
-          <div className="text-center text-slate-400">
-            <Mail className="h-12 w-12 mx-auto mb-4" />
-            <p>Select a conversation to view messages</p>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="flex-1 min-h-0 flex flex-col items-center justify-center p-6">
+        <div className="text-center text-muted-foreground">
+          <Mail className="h-12 w-12 mx-auto mb-4" />
+          <p className="text-sm">Select a conversation to view messages</p>
+        </div>
+      </div>
     );
   }
 
@@ -45,9 +57,14 @@ export const ConversationView: React.FC<ConversationViewProps> = ({ conversation
         : 'Not linked';
 
   const isUnlinked = !conversation.person_id || ((conversation.link_state ?? 'unlinked') !== 'linked');
+  const subject = conversation.subject?.trim() || null;
+  const handleLine = `${conversation.channel} · ${conversation.primary_handle}`;
+
+  const relatedOrderIds = personOrders.map(getOrderDisplayId);
+  const orderDisplayIdsText = relatedOrderIds.length > 0 ? formatOrderIdsForHeader(relatedOrderIds) : null;
 
   return (
-    <div className="h-full flex flex-col min-h-0 min-w-0 overflow-hidden">
+    <div className="flex-1 min-h-0 flex flex-col min-w-0 overflow-hidden">
       <LinkConversationModal
         open={linkModalOpen}
         onOpenChange={setLinkModalOpen}
@@ -58,21 +75,30 @@ export const ConversationView: React.FC<ConversationViewProps> = ({ conversation
         onUnlinked={() => setLinkModalOpen(false)}
       />
 
-      <ConversationHeader
+      <div className="shrink-0">
+        <ConversationHeader
         displayName={personDisplay ?? conversation.primary_handle}
-        secondaryLine={`${conversation.channel} · ${conversation.primary_handle}`}
+        handleLine={handleLine}
+        subjectLine={subject}
         linkStateLabel={linkStateLabel}
+        orderDisplayIdsText={orderDisplayIdsText}
         actionButtonLabel={isUnlinked ? 'Link person' : 'Change link'}
         onActionClick={() => setLinkModalOpen(true)}
       />
+      </div>
 
-      <ConversationThread
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+        <ConversationThread
         messages={messages}
         readOnly={false}
         conversationId={conversationId}
         channel={conversation.channel as 'email' | 'sms' | 'whatsapp'}
+        participantName={personDisplay ?? null}
+        onReplyChannelChange={onReplyChannelChange}
         scrollContainerRef={messagesContainerRef}
+        conversationSubject={conversation.subject}
       />
+      </div>
     </div>
   );
 };

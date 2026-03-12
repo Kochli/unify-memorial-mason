@@ -36,6 +36,11 @@ export interface Invoice {
   locked_at?: string | null;
   /** Invoice owner (for RLS) */
   user_id?: string | null;
+
+  /** Breakdown totals (derived from linked order; present in invoices_with_breakdown view) */
+  main_product_total?: number | null;
+  additional_options_total?: number | null;
+  permit_total_cost?: number | null;
 }
 
 /** One row per payment against a Stripe invoice (from webhook) */

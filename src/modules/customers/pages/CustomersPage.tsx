@@ -10,6 +10,7 @@ import { transformCustomersFromDb, type UICustomer } from "../utils/customerTran
 import { CreateCustomerDrawer } from "../components/CreateCustomerDrawer";
 import { EditCustomerDrawer } from "../components/EditCustomerDrawer";
 import { DeleteCustomerDialog } from "../components/DeleteCustomerDialog";
+import { formatDateDMY } from "@/shared/lib/formatters";
 
 export const CustomersPage: React.FC = () => {
   const { data: customersData, isLoading, error, refetch } = useCustomersList();
@@ -131,7 +132,7 @@ export const CustomersPage: React.FC = () => {
                 <TableCell>{customer.city || "—"}</TableCell>
                 <TableCell>{customer.country || "—"}</TableCell>
                 <TableCell>
-                  {customer.createdAt ? new Date(customer.createdAt).toLocaleDateString() : "—"}
+                  {customer.createdAt ? formatDateDMY(customer.createdAt) : "—"}
                 </TableCell>
                 <TableCell className="text-right space-x-2">
                   <Button variant="outline" size="sm" onClick={() => handleEdit(customer.id)}>

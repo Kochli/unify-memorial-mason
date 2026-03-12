@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import type { PermitActivityLog, ActivityType } from '../types/permitAgent.types';
 import { ACTIVITY_LABELS } from '../types/permitAgent.types';
+import { formatDateTimeDMY } from '@/shared/lib/formatters';
 
 interface ActivityTrackerProps {
   activities: PermitActivityLog[];
@@ -37,14 +38,7 @@ const activityColors: Record<ActivityType, string> = {
 };
 
 function formatTimestamp(dateString: string) {
-  const d = new Date(dateString);
-  return d.toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatDateTimeDMY(dateString, { withTime: true, withSeconds: false, use12Hour: false });
 }
 
 export const ActivityTracker: React.FC<ActivityTrackerProps> = ({ activities, className }) => {

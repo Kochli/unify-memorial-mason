@@ -1,4 +1,5 @@
 import type { Order } from '../types/orders.types';
+import { formatGbpDecimal } from '@/shared/lib/formatters';
 
 /**
  * Check if an order is a Renovation order type
@@ -57,9 +58,6 @@ export function getOrderTotal(order: Order): number {
  */
 export function getOrderTotalFormatted(order: Order): string {
   const total = getOrderTotal(order);
-  return `£${total.toLocaleString('en-GB', { 
-    minimumFractionDigits: 2, 
-    maximumFractionDigits: 2 
-  })}`;
+  return formatGbpDecimal(total);
 }
 

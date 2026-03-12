@@ -9,6 +9,7 @@ import {
 import { Order, MainStatus, StoneStatus, ProofStatus } from '@/shared/types/prototype.types';
 import { DUMMY_ORDERS } from '@/shared/lib/prototypeConstants';
 import OrderDetailsSidePanel from '@/modules/orders/components/OrderDetailsSidePanel';
+import { formatGbpDecimal } from '@/shared/lib/formatters';
 
 interface OrdersDashboardProps {
   navigatedOrderId?: string | null;
@@ -170,7 +171,7 @@ const OrdersDashboard: React.FC<OrdersDashboardProps> = ({ navigatedOrderId, onC
 
                   <td className="px-4 lg:px-6 xl:px-8 py-4 xl:py-6">
                     <div className="flex flex-col">
-                      <p className="text-xs font-black text-slate-900 leading-none">£{total.toLocaleString()}</p>
+                      <p className="text-xs font-black text-slate-900 leading-none">{formatGbpDecimal(total)}</p>
                       <div className="flex items-center gap-2 mt-1.5">
                         <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                            <div className="h-full bg-green-500" style={{ width: `${(order.paidAmount/total) * 100}%` }} />

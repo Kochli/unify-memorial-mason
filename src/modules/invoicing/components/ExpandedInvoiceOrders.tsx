@@ -16,6 +16,7 @@ import type { CreateStripeInvoiceResponse } from '../api/stripe.api';
 import { useUpdateInvoice } from '../hooks/useInvoices';
 import { ensureStripeInvoice } from '../utils/ensureStripeInvoice';
 import { fetchInvoice } from '../api/invoicing.api';
+import { formatDateDMY } from '@/shared/lib/formatters';
 
 interface ExpandedInvoiceOrdersProps {
   invoiceId: string;
@@ -160,7 +161,7 @@ export const ExpandedInvoiceOrders: React.FC<ExpandedInvoiceOrdersProps> = ({ in
               {order.stone_status}
             </Badge>
           </TableCell>
-          <TableCell>{order.due_date ? new Date(order.due_date).toLocaleDateString() : 'N/A'}</TableCell>
+          <TableCell>{order.due_date ? formatDateDMY(order.due_date) : 'N/A'}</TableCell>
           <TableCell></TableCell>
           <TableCell>
             <div className="flex gap-1">

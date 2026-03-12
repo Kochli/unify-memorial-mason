@@ -1,86 +1,78 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Card, CardContent, CardHeader } from "@/shared/components/ui/card";
-import { Button } from "@/shared/components/ui/button";
-import { Badge } from "@/shared/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/components/ui/tabs";
-import { Input } from "@/shared/components/ui/input";
-import { ChevronLeft, ChevronRight, Mail, Phone, MessageSquare, Search, Archive, Eye, EyeOff } from 'lucide-react';
-import { cn } from "@/shared/lib/utils";
 import { useToast } from '@/shared/hooks/use-toast';
 import { supabase } from '@/shared/lib/supabase';
 import { ConversationView } from "../components/ConversationView";
-import { PeopleSidebar } from "../components/PeopleSidebar";
+import { InboxConversationList, type ListFilter, type ChannelFilter } from "../components/InboxConversationList";
 import { PersonOrdersPanel } from "../components/PersonOrdersPanel";
-import { AllMessagesTimeline } from "../components/AllMessagesTimeline";
 import {
   inboxKeys,
   useConversationsList,
   useConversation,
+  useCreateConversation,
   useMarkAsRead,
   useMarkAsUnread,
-  useArchiveConversations,
+  useDeleteConversations,
   useSyncGmail,
 } from "@/modules/inbox/hooks/useInboxConversations";
+import { NewConversationModal, type NewConversationResult } from "@/modules/inbox/components/NewConversationModal";
 import { useGmailConnection } from "@/modules/inbox/hooks/useGmailConnection";
 import { gmailConnectionKeys } from "@/modules/inbox/hooks/useGmailConnection";
-import { formatConversationTimestamp } from "@/modules/inbox/utils/conversationUtils";
 import type { ConversationFilters } from "@/modules/inbox/types/inbox.types";
+import { cn } from "@/shared/lib/utils";
 
 const REALTIME_DEBOUNCE_MS = 200;
-const GMAIL_POLL_INTERVAL_MS = 60_000;
+const GMAIL_POLL_INTERVAL_MS = 10_000;
 
 export const UnifiedInboxPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState("all");
+  const [listFilter, setListFilter] = useState<ListFilter>('all');
+  const [channelFilter, setChannelFilter] = useState<ChannelFilter>('all');
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
-  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [newConversationModalOpen, setNewConversationModalOpen] = useState(false);
   const autoReadOnceRef = useRef<Set<string>>(new Set());
   const realtimePendingIdsRef = useRef<Set<string>>(new Set());
   const realtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [realtimeInvalidateIds, setRealtimeInvalidateIds] = useState<string[]>([]);
+  const setRealtimeInvalidateIdsRef = useRef(setRealtimeInvalidateIds);
+  setRealtimeInvalidateIdsRef.current = setRealtimeInvalidateIds;
 
   const { data: selectedConversation } = useConversation(selectedConversationId);
-  const activePersonId = (selectedConversation?.person_id ?? selectedPersonId ?? null) as string | null;
+  const activePersonId = (selectedConversation?.person_id ?? null) as string | null;
 
   useEffect(() => {
     setSelectedOrderId(null);
   }, [activePersonId]);
 
-  // Map tab to filters
-  const filters = React.useMemo<ConversationFilters>(() => {
+  // Build base API filters from list filter and search (no channel or person_id; unlinked is a filter option)
+  const baseFilters = useMemo<ConversationFilters>(() => {
     const base: ConversationFilters = { status: 'open' };
-    
-    if (activeTab === 'email') {
-      base.channel = 'email';
-    } else if (activeTab === 'sms') {
-      base.channel = 'sms';
-    } else if (activeTab === 'whatsapp') {
-      base.channel = 'whatsapp';
-    }
-    
-    if (searchQuery.trim()) {
-      base.search = searchQuery;
-    }
-
-    if (selectedPersonId != null) {
-      base.person_id = selectedPersonId;
-    } else {
-      base.unlinked_only = true;
-    }
-    
+    if (listFilter === 'unread') base.unread_only = true;
+    if (listFilter === 'unlinked') base.unlinked_only = true;
+    if (searchQuery.trim()) base.search = searchQuery;
     return base;
-  }, [activeTab, searchQuery, selectedPersonId]);
+  }, [listFilter, searchQuery]);
+
+  // Channel-scoped filters used for the visible list in the left panel.
+  const channelFilters = useMemo<ConversationFilters>(() => {
+    if (channelFilter === 'all') return baseFilters;
+    return { ...baseFilters, channel: channelFilter };
+  }, [baseFilters, channelFilter]);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
-  const { data: conversations, isLoading, isError } = useConversationsList(filters);
+  // Channel-filtered conversations: drive the visible list and most UI behavior.
+  const { data: conversations, isLoading, isError } = useConversationsList(channelFilters);
+  // All-channel conversations for the same filters: used by Reply via pills so they
+  // can always search across every channel regardless of the left-panel filter.
+  const { data: allConversations } = useConversationsList(baseFilters);
+  const createConversationMutation = useCreateConversation();
   const markAsReadMutation = useMarkAsRead();
   const markAsUnreadMutation = useMarkAsUnread();
-  const archiveMutation = useArchiveConversations();
+  const deleteMutation = useDeleteConversations();
   const syncGmailMutation = useSyncGmail();
   const { data: gmailConnection } = useGmailConnection();
   const { toast } = useToast();
@@ -109,6 +101,37 @@ export const UnifiedInboxPage: React.FC = () => {
     return map;
   }, [conversations]);
 
+  const allConversationsById = useMemo(() => {
+    const map = new Map<string, (typeof allConversations)[number]>();
+    allConversations?.forEach((conversation) => {
+      map.set(conversation.id, conversation);
+    });
+    return map;
+  }, [allConversations]);
+
+  // Client-side Urgent filter (no backend field): filter by subject/preview containing "urgent"
+  const displayConversations = useMemo(() => {
+    if (!conversations) return [];
+    if (listFilter !== 'urgent') return conversations;
+    return conversations.filter(
+      (c) =>
+        /urgent/i.test(c.subject ?? '') ||
+        /urgent/i.test(c.last_message_preview ?? '')
+    );
+  }, [conversations, listFilter]);
+
+  // Auto-select first (most recent) conversation on load or when selection is no longer in the visible list
+  useEffect(() => {
+    if (isLoading || isError) return;
+    if (displayConversations.length === 0) {
+      setSelectedConversationId(null);
+      return;
+    }
+    if (!selectedConversationId) {
+      setSelectedConversationId(displayConversations[0].id);
+    }
+  }, [displayConversations, isLoading, isError, selectedConversationId]);
+
   const toggleTargetIds = useMemo(() => {
     if (selectedItems.length > 0) {
       return selectedItems;
@@ -123,6 +146,26 @@ export const UnifiedInboxPage: React.FC = () => {
       return conversation ? conversation.unread_count > 0 : false;
     });
   }, [toggleTargetIds, conversationsById]);
+
+  const handleReplyChannelChange = (target: 'email' | 'sms' | 'whatsapp') => {
+    if (!selectedConversationId || !allConversations) return;
+
+    const current = allConversationsById.get(selectedConversationId);
+    if (!current || !current.person_id) return;
+
+    // Find the latest conversation for the same person in the target channel,
+    // searching across ALL channels, independent of the current left-panel filter.
+    const latest = allConversations.find(
+      (c) => c.person_id === current.person_id && c.channel === target
+    );
+
+    if (!latest) return;
+
+    // Update both the selected conversation and the channel filter so the
+    // left panel reflects the new channel.
+    setSelectedConversationId(latest.id);
+    setChannelFilter(target);
+  };
 
   // Auto-mark conversation as read when opened
   useEffect(() => {
@@ -153,19 +196,26 @@ export const UnifiedInboxPage: React.FC = () => {
     }
   }, [selectedConversationId, conversationsById, markAsReadMutation, toast]);
 
-  // Realtime: subscribe once to inbox_messages INSERT; debounced invalidation only (no cache patch).
-  // Existing inbox queries do not filter by company_id/org_id; RLS applies to Realtime payloads.
+  // Invalidate conversation/message queries from React lifecycle so All-tab observer refetches (same as Gmail onSuccess).
   useEffect(() => {
-    const channel = supabase.channel('inbox-messages');
+    if (realtimeInvalidateIds.length === 0) return;
+    queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+    realtimeInvalidateIds.forEach((conversationId) => {
+      queryClient.invalidateQueries({ queryKey: inboxKeys.messages.byConversation(conversationId) });
+    });
+    setRealtimeInvalidateIds([]);
+  }, [realtimeInvalidateIds, queryClient]);
+
+  // Realtime: subscribe to inbox_messages INSERT and inbox_conversations UPDATE; debounce then request invalidation via state.
+  // Invalidation runs in the effect above (React lifecycle) so it triggers All-tab refetch like Gmail sync onSuccess.
+  useEffect(() => {
+    const channel = supabase.channel('inbox-realtime');
     const flush = () => {
       realtimeDebounceRef.current = null;
       const ids = Array.from(realtimePendingIdsRef.current);
       realtimePendingIdsRef.current.clear();
       if (ids.length === 0) return;
-      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
-      ids.forEach((conversationId) => {
-        queryClient.invalidateQueries({ queryKey: inboxKeys.messages.byConversation(conversationId) });
-      });
+      setRealtimeInvalidateIdsRef.current(ids);
     };
     const scheduleFlush = () => {
       if (realtimeDebounceRef.current) return;
@@ -187,6 +237,21 @@ export const UnifiedInboxPage: React.FC = () => {
           }
         }
       )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'inbox_conversations',
+        },
+        (payload: { new?: { id?: string }; old?: { id?: string } }) => {
+          const conversationId = payload.new?.id ?? payload.old?.id;
+          if (conversationId) {
+            realtimePendingIdsRef.current.add(conversationId);
+            scheduleFlush();
+          }
+        }
+      )
       .subscribe();
 
     return () => {
@@ -199,7 +264,7 @@ export const UnifiedInboxPage: React.FC = () => {
     };
   }, [queryClient]);
 
-  // Gmail auto-sync: poll every 60s only when user has an active Gmail connection.
+  // Gmail auto-sync: poll every 10s when user has an active Gmail connection.
   useEffect(() => {
     if (!gmailConnection) return;
     const tick = () => {
@@ -215,15 +280,6 @@ export const UnifiedInboxPage: React.FC = () => {
       }
     };
   }, [gmailConnection]);
-
-  const getIcon = (channel: string) => {
-    switch (channel) {
-      case "email": return <Mail className="h-4 w-4" />;
-      case "sms":
-      case "whatsapp": return <Phone className="h-4 w-4" />;
-      default: return <MessageSquare className="h-4 w-4" />;
-    }
-  };
 
   const handleToggleReadUnread = () => {
     const ids = toggleTargetIds;
@@ -251,248 +307,158 @@ export const UnifiedInboxPage: React.FC = () => {
     }
   };
 
-  const handleArchive = () => {
-    if (selectedItems.length > 0) {
-      archiveMutation.mutate(selectedItems);
-      setSelectedItems([]);
-    }
+  const handleDelete = () => {
+    const ids =
+      selectedItems.length > 0 ? selectedItems : selectedConversationId ? [selectedConversationId] : [];
+    if (ids.length === 0) return;
+
+    const message =
+      ids.length === 1
+        ? 'Delete this conversation and all its messages? This cannot be undone.'
+        : `Delete ${ids.length} conversations and all their messages? This cannot be undone.`;
+
+    // Minimal confirmation UX consistent with existing app patterns.
+    if (!window.confirm(message)) return;
+
+    deleteMutation.mutate(ids, {
+      onSuccess: () => {
+        // If the selected conversation was deleted, clear selection and let auto-select pick next.
+        if (selectedConversationId && ids.includes(selectedConversationId)) {
+          setSelectedConversationId(null);
+        }
+        setSelectedItems([]);
+      },
+      onError: (error) => {
+        toast({
+          title: 'Delete failed',
+          description: error instanceof Error ? error.message : 'Could not delete conversation(s).',
+          variant: 'destructive',
+        });
+      },
+    });
   };
 
   const toggleSelection = (id: string) => {
-    setSelectedItems(prev => 
+    setSelectedItems(prev =>
       prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
     );
   };
 
+  const handleNewConversationStart = (result: NewConversationResult) => {
+    const payload = {
+      channel: result.channel,
+      primary_handle: result.primary_handle,
+      subject: result.subject ?? null,
+      person_id: result.person_id ?? null,
+    };
+
+    if (result.channel === 'email') {
+      createConversationMutation.mutate(payload, {
+        onSuccess: (data) => {
+          setSelectedConversationId(data.id);
+          setChannelFilter('email');
+        },
+        onError: (error) => {
+          toast({
+            title: 'Could not start conversation',
+            description: error instanceof Error ? error.message : 'Unknown error',
+            variant: 'destructive',
+          });
+        },
+      });
+      return;
+    }
+
+    if (result.channel === 'whatsapp' && result.person_id && allConversations?.length) {
+      const existing = allConversations.find(
+        (c) => c.person_id === result.person_id && c.channel === 'whatsapp'
+      );
+      if (existing) {
+        setSelectedConversationId(existing.id);
+        setChannelFilter('whatsapp');
+        return;
+      }
+    }
+
+    createConversationMutation.mutate(payload, {
+      onSuccess: (data) => {
+        setSelectedConversationId(data.id);
+        setChannelFilter('whatsapp');
+      },
+      onError: (error) => {
+        toast({
+          title: 'Could not start conversation',
+          description: error instanceof Error ? error.message : 'Unknown error',
+          variant: 'destructive',
+        });
+      },
+    });
+  };
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold">Unified Inbox</h1>
-          <p className="text-sm text-slate-600 mt-1">
-            Manage conversations from all channels
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleArchive}
-            disabled={selectedItems.length === 0}
-          >
-            <Archive className="h-4 w-4 sm:mr-2" />
-            <span className="hidden sm:inline">Archive</span>
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleToggleReadUnread}
-            disabled={toggleTargetIds.length === 0 || markAsReadMutation.isPending || markAsUnreadMutation.isPending}
-          >
-            {anyToggleTargetUnread ? (
-              <>
-                <Eye className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">Mark as Read</span>
-              </>
-            ) : (
-              <>
-                <EyeOff className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">Mark as Unread</span>
-              </>
-            )}
-          </Button>
-        </div>
-      </div>
-
-      <div className="flex gap-3 items-center">
-        <div className="relative flex-1">
-          <Search className="h-4 w-4 absolute left-3 top-3 text-slate-400" />
-          <Input
-            placeholder="Search conversations..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+      <NewConversationModal
+        open={newConversationModalOpen}
+        onOpenChange={setNewConversationModalOpen}
+        onStart={handleNewConversationStart}
+      />
+      {/* Three-column layout: fixed-height workspace, no page scroll */}
+      <div className="flex-1 min-h-0 min-w-0 overflow-hidden flex flex-col border border-slate-200 rounded-lg bg-white shadow-sm">
+        <div
+          className={cn(
+            'flex-1 min-h-0 grid grid-rows-1 gap-0 grid-cols-1 overflow-hidden',
+            'lg:grid-cols-[340px_minmax(0,1fr)_280px] xl:grid-cols-[360px_minmax(0,1fr)_300px]'
+          )}
+        >
+          {/* Column 1: Conversation list with filters and channel pills */}
+          <div className="min-h-0 h-full flex flex-col overflow-hidden border-r border-slate-200 bg-slate-100/60 p-2">
+            <InboxConversationList
+            listFilter={listFilter}
+            channelFilter={channelFilter}
+            searchQuery={searchQuery}
+            onListFilterChange={setListFilter}
+            onChannelFilterChange={setChannelFilter}
+            onSearchChange={setSearchQuery}
+            conversations={displayConversations}
+            selectedConversationId={selectedConversationId}
+            selectedItems={selectedItems}
+            onSelectConversation={setSelectedConversationId}
+            onToggleSelection={toggleSelection}
+            onNewClick={() => setNewConversationModalOpen(true)}
+            onDeleteClick={handleDelete}
+            onToggleReadUnreadClick={handleToggleReadUnread}
+            deleteDisabled={selectedItems.length === 0 && !selectedConversationId}
+            toggleReadUnreadDisabled={
+              toggleTargetIds.length === 0 ||
+              markAsReadMutation.isPending ||
+              markAsUnreadMutation.isPending
+            }
+            anyToggleTargetUnread={anyToggleTargetUnread}
+            isLoading={isLoading}
+            isError={isError}
+            hasGmailConnection={!!gmailConnection}
           />
+          </div>
+
+          {/* Column 2: Conversation thread + header + reply (full height; only thread scrolls; composer at bottom) */}
+          <div className="flex flex-col min-h-0 h-full min-w-0 overflow-hidden bg-white">
+            <ConversationView
+              conversationId={selectedConversationId}
+              onReplyChannelChange={handleReplyChannelChange}
+            />
+          </div>
+
+          {/* Column 3: Order context panel */}
+          <div className="hidden lg:flex lg:flex-col min-h-0 h-full min-w-0 overflow-hidden">
+            <PersonOrdersPanel
+            personId={activePersonId}
+            selectedOrderId={selectedOrderId}
+            onSelectOrder={setSelectedOrderId}
+            onCloseOrder={() => setSelectedOrderId(null)}
+          />
+          </div>
         </div>
       </div>
-
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-1.5">
-        <TabsList className="grid w-full grid-cols-4 gap-1 bg-muted/40 p-0.5 rounded-lg w-full max-w-md h-auto">
-          <TabsTrigger
-            value="all"
-            className="h-8 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md"
-          >
-            All
-          </TabsTrigger>
-          <TabsTrigger
-            value="email"
-            className="h-8 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md"
-          >
-            Email
-          </TabsTrigger>
-          <TabsTrigger
-            value="sms"
-            className="h-8 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md"
-          >
-            SMS
-          </TabsTrigger>
-          <TabsTrigger
-            value="whatsapp"
-            className="h-8 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md"
-          >
-            WhatsApp
-          </TabsTrigger>
-        </TabsList>
-
-        {(() => {
-          const showUnifiedTimeline = activeTab === 'all' && selectedPersonId != null;
-          const gridColsLg = isSidebarCollapsed
-            ? 'lg:grid-cols-[64px_minmax(0,1fr)_300px] xl:grid-cols-[64px_minmax(0,1fr)_360px]'
-            : 'lg:grid-cols-[160px_minmax(0,1fr)_300px] xl:grid-cols-[180px_minmax(0,1fr)_360px]';
-          return (
-            <div className={cn(
-              "grid gap-4 min-h-[480px] min-h-0 min-w-0 grid-cols-1",
-              gridColsLg
-            )}>
-              {/* Column 1: People sidebar */}
-              <div className="h-full min-h-0 flex flex-col overflow-hidden">
-                <div className="hidden lg:flex justify-end px-1 pt-1 pb-0">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={() => setIsSidebarCollapsed((prev) => !prev)}
-                    aria-label={isSidebarCollapsed ? 'Expand people sidebar' : 'Collapse people sidebar'}
-                  >
-                    {isSidebarCollapsed ? (
-                      <ChevronRight className="h-4 w-4" />
-                    ) : (
-                      <ChevronLeft className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
-                <PeopleSidebar
-                  selectedPersonId={selectedPersonId}
-                  onSelectPerson={setSelectedPersonId}
-                  collapsed={isSidebarCollapsed}
-                />
-              </div>
-
-              {/* Column 2: Conversation area */}
-              <div className="min-h-0 min-w-0 flex flex-col overflow-hidden">
-                {showUnifiedTimeline ? (
-                  <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
-                    <AllMessagesTimeline
-                      personId={selectedPersonId}
-                      onOpenThread={({ channel, conversationId }) => {
-                        setActiveTab(channel);
-                        setSelectedConversationId(conversationId);
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <div className="min-h-0 min-w-0 grid gap-3 grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[260px_minmax(0,1fr)]">
-                    {/* Conversations column: only for Email/SMS/WhatsApp */}
-                    <div className="h-full min-h-0 flex flex-col overflow-hidden">
-                      <div className="flex-1 min-h-0 overflow-auto space-y-2">
-                        {isLoading ? (
-                          <Card className="p-8 text-center">
-                            <div className="text-slate-400">
-                              <Mail className="h-12 w-12 mx-auto mb-4" />
-                              <p>Loading conversations...</p>
-                            </div>
-                          </Card>
-                        ) : isError ? (
-                          <Card className="p-8 text-center">
-                            <div className="text-slate-400">
-                              <Mail className="h-12 w-12 mx-auto mb-4" />
-                              <p>Unable to load conversations</p>
-                            </div>
-                          </Card>
-                        ) : !conversations || conversations.length === 0 ? (
-                          <Card className="p-8 text-center">
-                            <div className="text-slate-400">
-                              <Mail className="h-12 w-12 mx-auto mb-4" />
-                              {activeTab === 'email' && !gmailConnection ? (
-                                <p>Connect Gmail above to sync and send email from this inbox.</p>
-                              ) : (
-                                <p>No conversations found</p>
-                              )}
-                            </div>
-                          </Card>
-                        ) : (
-                          conversations.map((conversation) => (
-                            <Card
-                              key={conversation.id}
-                              className={`cursor-pointer transition-all rounded-md border-b last:border-b-0 hover:bg-muted/30 ${
-                                selectedConversationId === conversation.id
-                                  ? 'bg-muted/50 ring-1 ring-primary/30 border-l-2 border-l-primary'
-                                  : ''
-                              }`}
-                              onClick={() => setSelectedConversationId(conversation.id)}
-                            >
-                            <CardHeader className="px-2 py-1.5">
-                                <div className="flex items-center justify-between gap-1">
-                                  <div className="flex items-center gap-1 min-w-0 flex-1">
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedItems.includes(conversation.id)}
-                                      onChange={() => toggleSelection(conversation.id)}
-                                      className="rounded shrink-0"
-                                      onClick={(e) => e.stopPropagation()}
-                                    />
-                                    {getIcon(conversation.channel)}
-                                    <div className="min-w-0 flex-1">
-                                      <div className="text-xs font-medium truncate">{conversation.primary_handle}</div>
-                                      <div className="text-[11px] text-muted-foreground truncate leading-tight">
-                                        {conversation.subject || conversation.last_message_preview || ''}
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="text-[10px] text-muted-foreground shrink-0">
-                                    {formatConversationTimestamp(conversation.last_message_at)}
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-1.5 ml-6 mt-0.5">
-                                  {conversation.unread_count > 0 && (
-                                    <Badge variant="default" className="bg-blue-500 text-[10px] px-1.5 py-0.5 rounded-sm">
-                                      {conversation.unread_count} unread
-                                    </Badge>
-                                  )}
-                                  <Badge variant="outline" className="capitalize text-[10px] px-1.5 py-0.5 rounded-sm">
-                                    {conversation.channel}
-                                  </Badge>
-                                </div>
-                              </CardHeader>
-                            </Card>
-                          ))
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Conversation panel column: 1fr, message list scrolls inside ConversationView */}
-                    <div className="min-h-0 min-w-0 flex flex-col gap-4">
-                      <div className="flex-1 min-h-[200px] min-w-0 flex flex-col overflow-hidden">
-                        <ConversationView conversationId={selectedConversationId} />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Column 3: Related Orders panel */}
-              <div className="hidden lg:flex lg:flex-col min-h-0 min-w-0 overflow-hidden">
-                <PersonOrdersPanel
-                  personId={activePersonId}
-                  selectedOrderId={selectedOrderId}
-                  onSelectOrder={setSelectedOrderId}
-                  onCloseOrder={() => setSelectedOrderId(null)}
-                />
-              </div>
-            </div>
-          );
-        })()}
-      </Tabs>
     </div>
   );
 };

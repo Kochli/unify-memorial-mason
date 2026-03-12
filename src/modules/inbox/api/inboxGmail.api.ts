@@ -99,6 +99,47 @@ export async function sendGmailReply({
 }
 
 /**
+ * Send the first message in an email conversation (new thread). Uses gmail-send-first-message Edge Function.
+ * Call this when the conversation has no messages yet; use sendGmailReply for existing threads.
+ */
+export async function sendGmailFirstMessage({
+  conversationId,
+  bodyText,
+  subject,
+}: {
+  conversationId: string;
+  bodyText: string;
+  subject?: string;
+}): Promise<SendGmailReplyResult> {
+  const functionsUrl = import.meta.env.VITE_SUPABASE_FUNCTIONS_URL;
+  if (!functionsUrl) {
+    throw new Error('VITE_SUPABASE_FUNCTIONS_URL is not set');
+  }
+  const token = await getAccessToken();
+  const response = await fetch(`${functionsUrl}/gmail-send-first-message`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      conversation_id: conversationId,
+      message_body: bodyText,
+      ...(subject != null && subject !== '' ? { subject } : {}),
+    }),
+  });
+  if (response.status === 404) {
+    const err = await response.json().catch(() => ({ error: 'No Gmail connection' }));
+    throw new Error(err.error ?? 'No Gmail connection');
+  }
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+    throw new Error(errorData.error ?? `Gmail send failed: ${response.statusText}`);
+  }
+  return (await response.json()) as SendGmailReplyResult;
+}
+
+/**
  * Send a new outbound Gmail email (new thread). Uses legacy inbox-gmail-new-thread if present;
  * otherwise throws. Not part of per-user Gmail spec; kept for compatibility.
  */

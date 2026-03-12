@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
 import { Button } from "@/shared/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/components/ui/tabs";
@@ -34,6 +35,7 @@ export const OrdersPage: React.FC = () => {
   const loadedFromStorageRef = useRef(false);
 
   const { data: ordersData, isLoading, error } = useOrdersList();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: presets } = usePresetsByModule('orders');
 
   const STORAGE_KEY = 'orders.columns.v1';
@@ -144,6 +146,16 @@ export const OrdersPage: React.FC = () => {
       readyForInstall: uiOrders.filter(o => o.stoneStatus === "In Stock" && o.permitStatus === "approved" && o.proofStatus === "Lettered").length
     };
   }, [uiOrders]);
+
+  // Deep-link: ?order=<id> → open that order in the sidebar
+  useEffect(() => {
+    const orderId = searchParams.get('order');
+    if (!orderId || selectedOrder || !ordersData) return;
+    const match = ordersData.find((o) => o.id === orderId);
+    if (match) {
+      setSelectedOrder(match);
+    }
+  }, [searchParams, selectedOrder, ordersData]);
 
   if (error) {
     return (
@@ -307,7 +319,15 @@ export const OrdersPage: React.FC = () => {
       {/* Order Details Sidebar */}
       <OrderDetailsSidebar 
         order={selectedOrder} 
-        onClose={() => setSelectedOrder(null)}
+        onClose={() => {
+          setSelectedOrder(null);
+          setSearchParams((prev) => {
+            if (!prev.get('order')) return prev;
+            const next = new URLSearchParams(prev);
+            next.delete('order');
+            return next;
+          });
+        }}
         onOrderUpdate={handleOrderUpdate}
       />
 

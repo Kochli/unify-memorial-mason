@@ -1,53 +1,59 @@
 import React from 'react';
-import { Button } from '@/shared/components/ui/button';
-import { Badge } from '@/shared/components/ui/badge';
-import { Avatar, AvatarFallback } from '@/shared/components/ui/avatar';
+import { cn } from '@/shared/lib/utils';
 
 export interface ConversationHeaderProps {
-  /** Primary display name (e.g. person name or handle) */
   displayName: string;
-  /** Secondary line (e.g. "email · user@example.com") */
-  secondaryLine: string;
-  /** Status pill label: "Linked" | "Not linked" | "Ambiguous" */
+  handleLine: string;
+  subjectLine?: string | null;
   linkStateLabel: string;
-  /** Action button label, e.g. "Link person" or "Change link". Omit to hide button (e.g. read-only All tab). */
+  orderDisplayIdsText?: string | null;
   actionButtonLabel?: string;
-  /** Called when the action button is clicked. Required if actionButtonLabel is set. */
   onActionClick?: () => void;
 }
 
+/** Conversation header. Custom styling only (no shadcn Avatar/Button). */
 export const ConversationHeader: React.FC<ConversationHeaderProps> = ({
   displayName,
-  secondaryLine,
+  handleLine,
+  subjectLine = null,
   linkStateLabel,
+  orderDisplayIdsText,
   actionButtonLabel,
   onActionClick,
 }) => {
-  const initials = displayName.substring(0, 2).toUpperCase() || '—';
-
   return (
-    <div className="sticky top-0 z-10 bg-background border-b shrink-0 px-3 py-2 flex items-center justify-between gap-2">
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        <Avatar className="h-8 w-8 shrink-0">
-          <AvatarFallback className="text-xs">{initials}</AvatarFallback>
-        </Avatar>
+    <div className="sticky top-0 z-10 bg-white border-b border-slate-200 shrink-0 px-4 py-3 flex items-center justify-between gap-3">
+      <div className="flex items-center gap-3 min-w-0 flex-1">
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium truncate">{displayName}</p>
-          <p className="text-xs text-muted-foreground truncate">{secondaryLine}</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-lg font-semibold text-slate-900 truncate">
+              {displayName}
+            </span>
+            {orderDisplayIdsText && (
+              <span className="text-[11px] font-mono text-slate-500 truncate min-w-0">
+                {orderDisplayIdsText}
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-slate-500 truncate mt-0.5">{handleLine}</p>
+          {subjectLine && (
+            <p className="text-[12px] text-slate-600 truncate mt-0.5">
+              {subjectLine}
+            </p>
+          )}
         </div>
-        <Badge variant="outline" className="text-[11px] px-1.5 py-0 shrink-0">
+        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200 shrink-0">
           {linkStateLabel}
-        </Badge>
+        </span>
       </div>
       {actionButtonLabel != null && (
-        <Button
-          variant="outline"
-          size="sm"
+        <button
+          type="button"
           onClick={onActionClick}
-          className="shrink-0"
+          className="shrink-0 px-3 py-1.5 text-sm font-medium rounded-lg border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
         >
           {actionButtonLabel}
-        </Button>
+        </button>
       )}
     </div>
   );

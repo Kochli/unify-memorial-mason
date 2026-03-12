@@ -21,8 +21,8 @@ export const DashboardLayout: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col w-full">
-      <header className="h-14 border-b bg-white flex items-center justify-between px-2 sm:px-4">
+    <div className="h-screen flex flex-col w-full overflow-hidden">
+      <header className="h-14 shrink-0 border-b bg-white flex items-center justify-between px-2 sm:px-4">
         <h1 className="ml-2 sm:ml-4 text-sm sm:text-lg font-semibold truncate">Memorial Mason Management</h1>
         <div className="flex items-center gap-2 shrink-0">
           <GmailConnectionStatus />
@@ -56,8 +56,10 @@ export const DashboardLayout: React.FC = () => {
           </DropdownMenu>
         </div>
       </header>
-      <main className="flex-1 min-w-0 p-3 sm:p-6 bg-slate-50 overflow-x-hidden">
-        <Outlet />
+      <main className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden p-3 sm:p-6 bg-slate-50">
+        <div className="flex-1 min-h-0 min-w-0 overflow-auto flex flex-col">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

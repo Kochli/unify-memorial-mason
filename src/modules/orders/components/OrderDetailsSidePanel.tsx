@@ -9,6 +9,7 @@ import {
 import { Order, MainStatus, StoneStatus, ProofStatus, StoneShape } from '@/shared/types/prototype.types';
 import VisualProof from '@/modules/inscriptions/components/VisualProof';
 import { DUMMY_PRODUCTS } from '@/shared/lib/prototypeConstants';
+import { formatGbpDecimal } from '@/shared/lib/formatters';
 
 interface OrderDetailsSidePanelProps {
   order: Order;
@@ -183,15 +184,15 @@ const OrderDetailsSidePanel: React.FC<OrderDetailsSidePanelProps> = ({ order, on
                <div className="space-y-4">
                  <div className="flex justify-between items-baseline gap-2">
                    <p className="text-xs font-medium text-white/60">Total Contract</p>
-                   <p className="text-xl font-black">£{totalValue.toLocaleString()}</p>
+                   <p className="text-xl font-black">{formatGbpDecimal(totalValue)}</p>
                  </div>
                  <div className="flex justify-between items-baseline gap-2">
                    <p className="text-xs font-medium text-green-400/80">Paid to Date</p>
-                   <p className="text-xl font-black text-green-400">£{order.paidAmount.toLocaleString()}</p>
+                   <p className="text-xl font-black text-green-400">{formatGbpDecimal(order.paidAmount)}</p>
                  </div>
                  <div className="pt-4 border-t border-white/10 flex justify-between items-baseline gap-2">
                    <p className="text-xs font-black uppercase tracking-wider text-orange-400">Balance Due</p>
-                   <p className="text-2xl font-black text-orange-400">£{balance.toLocaleString()}</p>
+                   <p className="text-2xl font-black text-orange-400">{formatGbpDecimal(balance)}</p>
                  </div>
                </div>
             </section>
@@ -199,8 +200,8 @@ const OrderDetailsSidePanel: React.FC<OrderDetailsSidePanelProps> = ({ order, on
             <section>
               <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-4">Order Ledger</h3>
               <div className="space-y-3">
-                <InvoiceItem type="Deposit" amount={order.baseValue * 0.5} status={order.paidAmount >= order.baseValue * 0.5 ? "Paid" : "Pending"} date="Jan 12, 2024" />
-                <InvoiceItem type="Permit Fee" amount={order.permitCost} status={order.paidAmount >= (order.baseValue * 0.5 + order.permitCost) ? "Paid" : "Pending"} date="Jan 15, 2024" />
+                <InvoiceItem type="Deposit" amount={order.baseValue * 0.5} status={order.paidAmount >= order.baseValue * 0.5 ? "Paid" : "Pending"} date="12-01-2024" />
+                <InvoiceItem type="Permit Fee" amount={order.permitCost} status={order.paidAmount >= (order.baseValue * 0.5 + order.permitCost) ? "Paid" : "Pending"} date="15-01-2024" />
                 <InvoiceItem type="Final Balance" amount={order.baseValue * 0.5} status={order.paidAmount >= totalValue ? "Paid" : "Draft"} />
               </div>
             </section>
@@ -249,7 +250,7 @@ const InvoiceItem = ({ type, amount, status, date }: { type: string, amount: num
     </div>
     <div className="flex items-center gap-4 shrink-0">
       <div className="text-right">
-        <p className="text-sm font-black text-slate-900">£{amount.toLocaleString()}</p>
+        <p className="text-sm font-black text-slate-900">{formatGbpDecimal(amount)}</p>
         <span className={`text-[9px] font-black uppercase tracking-widest ${status === 'Paid' ? 'text-green-600' : 'text-orange-500'}`}>{status}</span>
       </div>
       <button className="p-2 bg-slate-50 rounded-xl text-slate-400 opacity-0 group-hover:opacity-100 transition-all">

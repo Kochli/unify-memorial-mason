@@ -1,38 +1,17 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Button } from '@/shared/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card';
-import { Textarea } from '@/shared/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/shared/components/ui/select';
-import { Reply, Send, X } from 'lucide-react';
+import { Send, X, Sparkles } from 'lucide-react';
+import { ReplyChannelPills } from '@/modules/inbox/components/ReplyChannelPills';
+import { InboxMessageBubble } from '@/modules/inbox/components/InboxMessageBubble';
 import { cn } from '@/shared/lib/utils';
-import { formatMessageTimestamp } from '@/modules/inbox/utils/conversationUtils';
 import { useSendReply } from '@/modules/inbox/hooks/useInboxMessages';
 import { useSuggestedReply } from '@/modules/inbox/hooks/useSuggestedReply';
 import type { InboxMessage } from '@/modules/inbox/types/inbox.types';
+import { formatDateTimeDMY } from '@/shared/lib/formatters';
 
-const CHANNEL_LABELS: Record<'email' | 'sms' | 'whatsapp', string> = {
-  email: 'Email',
-  sms: 'SMS',
-  whatsapp: 'WhatsApp',
-};
-
-function getChannelBorderClass(channel: 'email' | 'sms' | 'whatsapp'): string {
-  switch (channel) {
-    case 'email':
-      return 'border-l-2 border-red-400/60 dark:border-red-400/80';
-    case 'sms':
-      return 'border-l-2 border-blue-400/60 dark:border-blue-400/80';
-    case 'whatsapp':
-      return 'border-l-2 border-green-400/60 dark:border-green-400/80';
-    default:
-      return 'border-l-2 border-slate-300/50 dark:border-slate-600/50';
-  }
+function formatBubbleTimestamp(value: string): string {
+  // Standard: DD-MM-YYYY HH:MM (24h)
+  const out = formatDateTimeDMY(value, { withTime: true, withSeconds: false, use12Hour: false });
+  return out === '—' ? '' : out;
 }
 
 function isLikelyHtml(body: string): boolean {
@@ -80,6 +59,12 @@ export interface ConversationThreadProps {
   onSendSuccess?: () => void;
   /** Optional ref to attach to the scroll container (e.g. for auto-scroll to bottom). */
   scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
+  /** Optional linked person name (used for nicer sender display in message meta). */
+  participantName?: string | null;
+  /** Optional callback when user clicks a reply-channel pill (used by Unified Inbox). */
+  onReplyChannelChange?: (channel: 'email' | 'sms' | 'whatsapp') => void;
+  /** Conversation subject (for first email in new thread). */
+  conversationSubject?: string | null;
 }
 
 function mostRecentInboundChannel(messages: InboxMessage[]): 'email' | 'sms' | 'whatsapp' | null {
@@ -109,27 +94,15 @@ function deriveSubject(message: InboxMessage): string | null {
   return s && s.length ? s : null;
 }
 
-function deriveFromToLine(message: InboxMessage): string | null {
-  if (message.direction === 'inbound') {
-    const h = formatHandle(message.from_handle);
-    return h ? `From: ${h}` : null;
-  }
-  if (message.direction === 'outbound') {
-    const h = formatHandle(message.to_handle);
-    return h ? `To: ${h}` : null;
-  }
-  return null;
-}
-
 function buildMetaLine(message: InboxMessage): string | null {
   const subject = deriveSubject(message);
-  const fromTo = deriveFromToLine(message);
-  if (!subject && !fromTo) return null;
-  if (subject && fromTo) return `${subject} · ${fromTo}`;
-  return subject ?? fromTo;
+  // Important: do not display raw handles (emails/phone numbers) in the message header area.
+  // Subject is still useful context for email messages.
+  if (!subject) return null;
+  return subject;
 }
 
-const SUGGEST_CHIP_MAX_LEN = 50;
+const SUGGEST_CHIP_MAX_LEN = 120;
 
 function SuggestedReplyChip({
   suggestion,
@@ -144,37 +117,30 @@ function SuggestedReplyChip({
 }) {
   if (isLoading) {
     return (
-      <div className="mb-3 min-h-[28px] flex items-center">
-        <span className="text-xs text-muted-foreground">Suggesting reply…</span>
-      </div>
+      <span className="text-[11px] text-slate-500">Suggesting reply…</span>
     );
   }
   if (error) {
     return (
-      <div className="mb-3 min-h-[28px] flex items-center">
-        <span className="text-xs text-muted-foreground">Couldn&apos;t load suggestion</span>
-      </div>
+      <span className="text-[11px] text-slate-500">Couldn&apos;t load suggestion</span>
     );
   }
-  if (!suggestion) return <div className="mb-3 min-h-[28px]" />;
+  if (!suggestion) return null;
 
   const label =
     suggestion.length > SUGGEST_CHIP_MAX_LEN
       ? `${suggestion.slice(0, SUGGEST_CHIP_MAX_LEN)}…`
       : suggestion;
   return (
-    <div className="mb-3 flex items-center flex-wrap gap-1">
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="text-xs h-7 max-w-full truncate"
-        title={suggestion}
-        onClick={() => onUseSuggestion(suggestion)}
-      >
-        {label}
-      </Button>
-    </div>
+    <button
+      type="button"
+      title={suggestion}
+      onClick={() => onUseSuggestion(suggestion)}
+      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 max-w-full"
+    >
+      <Sparkles className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+      <span className="truncate">{label}</span>
+    </button>
   );
 }
 
@@ -191,6 +157,9 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
   onReplyToMessage,
   onSendSuccess,
   scrollContainerRef,
+  participantName = null,
+  onReplyChannelChange,
+  conversationSubject = null,
 }) => {
   const isUnifiedMode = !!conversationIdByChannel;
   const effectiveDefault = useMemo(() => {
@@ -245,11 +214,17 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
     });
   };
   const availableChannels = useMemo(() => {
-    if (!conversationIdByChannel) return [];
-    return (['email', 'sms', 'whatsapp'] as const).filter(
-      (ch) => conversationIdByChannel[ch] != null
-    );
+    if (conversationIdByChannel) {
+      return (['email', 'sms', 'whatsapp'] as const).filter(
+        (ch) => conversationIdByChannel[ch] != null
+      );
+    }
+    return ['email', 'sms', 'whatsapp'] as const;
   }, [conversationIdByChannel]);
+
+  // Active Reply via pill: always reflect the currently open conversation's channel (no stale local state).
+  const pillActiveChannel =
+    channelLocked ? replyTo!.channel : (isUnifiedMode ? selectedChannel : (channel ?? null)) ?? availableChannels[0];
 
   const lastInboundMessage = useMemo(
     () => messages.slice().reverse().find((m) => m.direction === 'inbound') ?? null,
@@ -274,8 +249,15 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
   const handleSendReply = () => {
     if (!activeConversationId || !replyText.trim() || !activeChannel) return;
     setErrorMessage(null);
+    const isFirstEmailMessage = activeChannel === 'email' && messages.length === 0;
     sendReplyMutation.mutate(
-      { conversationId: activeConversationId, bodyText: replyText, channel: activeChannel },
+      {
+        conversationId: activeConversationId,
+        bodyText: replyText,
+        channel: activeChannel,
+        isFirstEmailMessage: isFirstEmailMessage || undefined,
+        subject: isFirstEmailMessage ? conversationSubject : undefined,
+      },
       {
         onSuccess: () => {
           setReplyText('');
@@ -307,180 +289,157 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
           const isClickable = readOnly && !!onMessageClick;
           const showReplyAction = isUnifiedMode && !!onReplyToMessage && !readOnly;
           const metaLine = buildMetaLine(message);
+          const senderName = isInbound
+            ? participantName ?? message.from_handle
+            : 'You';
 
-          const bubble = (
-            <div
+          const bodyContent = showAsHtml ? (
+            <>
+              {showRaw ? (
+                <pre className="text-xs whitespace-pre-wrap break-words font-sans">{body}</pre>
+              ) : (
+                <div className="min-w-0 overflow-hidden max-w-full">
+                  <iframe
+                    sandbox=""
+                    srcDoc={sanitizeHtml(body)}
+                    title="Email content"
+                    className="w-full max-w-full min-h-[60px] max-h-48 border-0 bg-white text-slate-900"
+                  />
+                </div>
+              )}
+              <button
+                type="button"
+                className="h-6 px-1.5 text-xs mt-1 -ml-1 text-slate-500 hover:text-slate-700"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleRawHtml(message.id);
+                }}
+              >
+                {showRaw ? 'View formatted' : 'View raw'}
+              </button>
+            </>
+          ) : (
+            <p className={cn('text-sm whitespace-pre-wrap break-words', isEmail && 'break-all')}>
+              {body}
+            </p>
+          );
+
+          return (
+            <InboxMessageBubble
               key={message.id}
-              role={isClickable ? 'button' : undefined}
-              className={`flex min-w-0 ${isInbound ? 'justify-start' : 'justify-end'} ${isClickable ? 'cursor-pointer' : ''}`}
+              direction={isInbound ? 'inbound' : 'outbound'}
+              senderName={senderName}
+              channel={message.channel}
+              metaLine={metaLine}
+              timestamp={formatBubbleTimestamp(message.sent_at)}
+              onReply={showReplyAction ? () => handleReplyClick(message) : undefined}
               onClick={isClickable ? () => onMessageClick(message) : undefined}
             >
-              <div
-                className={cn(
-                  'min-w-0 px-4 py-2 rounded-lg overflow-hidden relative group border-l-2',
-                  getChannelBorderClass(message.channel as 'email' | 'sms' | 'whatsapp'),
-                  showAsHtml ? 'max-w-full' : 'max-w-[75%]',
-                  isInbound ? 'bg-slate-100 text-slate-900' : 'bg-blue-500 text-white',
-                  isClickable ? 'hover:opacity-90' : ''
-                )}
-              >
-                {metaLine && (
-                  <p className="text-[11px] text-muted-foreground truncate mb-1">
-                    {metaLine}
-                  </p>
-                )}
-                {showAsHtml ? (
-                  <>
-                    {showRaw ? (
-                      <pre className="text-xs whitespace-pre-wrap break-words font-sans">{body}</pre>
-                    ) : (
-                      <div className="min-w-0 overflow-hidden max-w-full">
-                        <iframe
-                          sandbox=""
-                          srcDoc={sanitizeHtml(body)}
-                          title="Email content"
-                          className="w-full max-w-full min-h-[60px] max-h-48 border-0 bg-white text-slate-900"
-                        />
-                      </div>
-                    )}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-1.5 text-xs mt-1 -ml-1"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleRawHtml(message.id);
-                      }}
-                    >
-                      {showRaw ? 'View formatted' : 'View raw'}
-                    </Button>
-                  </>
-                ) : (
-                  <p className={`text-sm whitespace-pre-wrap break-words ${isEmail ? 'break-all' : ''}`}>
-                    {body}
-                  </p>
-                )}
-                <div className="flex items-center justify-between gap-2 mt-1 min-w-0">
-                  <p
-                    className={`text-xs shrink-0 ${isInbound ? 'text-slate-500' : 'text-blue-100'}`}
-                  >
-                    {formatMessageTimestamp(message.sent_at)}
-                  </p>
-                  {showReplyAction && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-1.5 text-xs opacity-70 group-hover:opacity-100 -mr-1"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleReplyClick(message);
-                      }}
-                      aria-label="Reply"
-                    >
-                      <Reply className="h-3.5 w-3.5 mr-0.5" />
-                      Reply
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
+              {bodyContent}
+            </InboxMessageBubble>
           );
-          return bubble;
         })}
       </>
     );
 
   return (
-    <Card className="flex-1 flex flex-col min-w-0 min-h-0">
-      <CardHeader className="shrink-0">
-        <CardTitle className="text-base">Conversation</CardTitle>
-      </CardHeader>
-      <CardContent className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
-        <div
-          ref={scrollContainerRef}
-          className="flex-1 min-w-0 space-y-4 overflow-y-auto overflow-x-hidden max-h-96 mb-4"
-        >
-          {messageList}
-        </div>
+    <div className="flex-1 min-h-0 h-full flex flex-col min-w-0 overflow-hidden">
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden scrollbar-hide space-y-6 px-8 py-6 bg-slate-50/30"
+      >
+        {messageList}
+      </div>
 
-        {!readOnly && (
-          <div ref={composerRef} className="border-t pt-4 min-w-0 shrink-0">
-            {replyTo && (
-              <div className="mb-2 flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-muted-foreground">Replying to:</span>
-                <span
-                  className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs"
-                  title={replyTo.preview}
-                >
-                  {replyTo.preview.length > 40 ? `${replyTo.preview.slice(0, 40)}…` : replyTo.preview}
-                  {onReplyToClear && (
-                    <button
-                      type="button"
-                      onClick={onReplyToClear}
-                      className="rounded p-0.5 hover:bg-muted-foreground/20"
-                      aria-label="Clear reply-to"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  )}
-                </span>
-              </div>
-            )}
-            {isUnifiedMode && availableChannels.length > 0 && (
-              <div className="mb-3">
-                <Select
-                  value={availableChannels.includes(effectiveChannel) ? effectiveChannel : availableChannels[0]}
-                  onValueChange={(v) => setSelectedChannel(v as 'email' | 'sms' | 'whatsapp')}
-                  disabled={channelLocked}
-                >
-                  <SelectTrigger className="w-[140px]">
-                    <SelectValue placeholder="Channel" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableChannels.map((ch) => (
-                      <SelectItem key={ch} value={ch}>
-                        {CHANNEL_LABELS[ch]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            <SuggestedReplyChip
-              suggestion={suggestedReply.suggestion}
-              isLoading={suggestedReply.isLoading}
-              error={suggestedReply.error}
-              onUseSuggestion={setReplyText}
-            />
-            <Textarea
-              ref={textareaRef}
-              placeholder="Type your reply..."
-              className="mb-3"
-              rows={3}
-              value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
-            />
-            {errorMessage && <p className="mb-2 text-xs text-red-600">{errorMessage}</p>}
-            <div className="flex justify-end">
-              <Button
-                size="sm"
-                onClick={handleSendReply}
-                disabled={
-                  !replyText.trim() ||
-                  sendReplyMutation.isPending ||
-                  !activeConversationId ||
-                  !activeChannel
-                }
+      {!readOnly && (
+        <div ref={composerRef} className="shrink-0 border-t border-slate-200 pt-4 pb-3 px-4 min-w-0 bg-slate-100/60">
+          {replyTo && (
+            <div className="mb-2 flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-slate-500">Replying to:</span>
+              <span
+                className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-700"
+                title={replyTo.preview}
               >
-                <Send className="h-4 w-4 mr-2" />
-                {sendReplyMutation.isPending ? 'Sending...' : 'Send Reply'}
-              </Button>
+                {replyTo.preview.length > 40 ? `${replyTo.preview.slice(0, 40)}…` : replyTo.preview}
+                {onReplyToClear && (
+                  <button
+                    type="button"
+                    onClick={onReplyToClear}
+                    className="rounded p-0.5 hover:bg-slate-200"
+                    aria-label="Clear reply-to"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </span>
             </div>
+          )}
+          {/* Reply via pills: unified mode uses internal channel switching; inbox uses parent callback */}
+          {availableChannels.length > 0 && (
+            <div className="mb-3 flex items-center gap-2">
+              <span className="text-xs text-slate-500">Reply via</span>
+              <ReplyChannelPills
+                channels={availableChannels}
+                value={availableChannels.includes(pillActiveChannel) ? pillActiveChannel : availableChannels[0]}
+                onChange={(v) => {
+                  const ch = v as 'email' | 'sms' | 'whatsapp';
+                  if (isUnifiedMode) {
+                    setSelectedChannel(ch);
+                  }
+                  onReplyChannelChange?.(ch);
+                }}
+                disabled={false}
+              />
+            </div>
+          )}
+          <textarea
+            ref={textareaRef}
+            placeholder="Type your reply..."
+            rows={3}
+            value={replyText}
+            onChange={(e) => setReplyText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return;
+              if (e.shiftKey) return; // Shift+Enter: allow default (newline)
+              e.preventDefault();
+              if (
+                replyText.trim() &&
+                activeConversationId &&
+                activeChannel &&
+                !sendReplyMutation.isPending
+              ) {
+                handleSendReply();
+              }
+            }}
+            className="w-full mb-3 px-3 py-2.5 text-sm rounded-lg border border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400 resize-y min-h-[72px]"
+          />
+          {errorMessage && <p className="mb-2 text-xs text-red-600">{errorMessage}</p>}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <SuggestedReplyChip
+                suggestion={suggestedReply.suggestion}
+                isLoading={suggestedReply.isLoading}
+                error={suggestedReply.error}
+                onUseSuggestion={setReplyText}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleSendReply}
+              disabled={
+                !replyText.trim() ||
+                sendReplyMutation.isPending ||
+                !activeConversationId ||
+                !activeChannel
+              }
+              className="inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg bg-emerald-700 text-white hover:bg-emerald-800 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+            >
+              <Send className="h-4 w-4 mr-2" />
+              {sendReplyMutation.isPending ? 'Sending...' : 'Send'}
+            </button>
           </div>
-        )}
-      </CardContent>
-    </Card>
+        </div>
+      )}
+    </div>
   );
 };

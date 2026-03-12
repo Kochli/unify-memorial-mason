@@ -1,4 +1,11 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.49.4';
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.49.4';
+import {
+  parseEmailAddresses,
+  pickEmailForAutoLink,
+  pickPrimaryHandleEmail,
+  normalizeEmail,
+} from '../_shared/email.ts';
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -205,19 +212,32 @@ Deno.serve(async (req: Request): Promise<Response> => {
         const subjectHeader = getHeader('Subject');
         const dateHeader = getHeader('Date');
 
-        // Parse email addresses
-        const extractEmail = (header: string): string => {
-          const match = header.match(/<(.+?)>/);
-          return match ? match[1] : header.trim();
-        };
+        const fromEmails = parseEmailAddresses(fromHeader);
+        const toEmails = parseEmailAddresses(toHeader);
 
-        const fromEmail = extractEmail(fromHeader);
-        const toEmail = extractEmail(toHeader);
+        // Store message-level from/to as a single deterministic email for display.
+        // (The linking logic uses stricter selection rules below.)
+        const fromEmail = fromEmails[0] ?? normalizeEmail(fromHeader);
+        const toEmail = toEmails[0] ?? normalizeEmail(toHeader);
         const subject = subjectHeader || '(no subject)';
 
-        // Determine direction and primary handle
-        const direction = fromEmail === userEmail ? 'outbound' : 'inbound';
-        const primaryHandle = direction === 'inbound' ? fromEmail : toEmail;
+        // Determine direction and primary handle.
+        const direction = normalizeEmail(fromEmail) === normalizeEmail(userEmail) ? 'outbound' : 'inbound';
+        const primaryHandle =
+          pickPrimaryHandleEmail({
+            direction,
+            fromEmails,
+            toEmails,
+            userEmail,
+          }) ?? (direction === 'inbound' ? normalizeEmail(fromEmail) : normalizeEmail(toEmail));
+
+        // Only attempt auto-link when we can safely determine an unambiguous counterparty email.
+        const emailForAutoLink = pickEmailForAutoLink({
+          direction,
+          fromEmails,
+          toEmails,
+          userEmail,
+        });
 
         // Parse sentAt
         let sentAt: string;
@@ -320,11 +340,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
           conversationId = newConversation.id;
         }
 
-        // Auto-link conversation to People (customers) by strict email match
-        try {
-          await attemptAutoLink(supabase, conversationId, "email", primaryHandle);
-        } catch (e) {
-          console.error("inbox-gmail-sync: auto-link failed", e);
+        // Auto-link conversation to People (customers) by strict normalized email match.
+        if (emailForAutoLink) {
+          try {
+            await attemptAutoLink(supabase, conversationId, 'email', emailForAutoLink);
+          } catch (e) {
+            console.error('inbox-gmail-sync: auto-link failed', e);
+          }
         }
 
         // Check for duplicate message
@@ -434,7 +456,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 type LinkState = "linked" | "unlinked" | "ambiguous";
 
 async function attemptAutoLink(
-  supabaseAdmin: any,
+  supabaseAdmin: SupabaseClient,
   conversationId: string,
   channel: "email" | "sms" | "whatsapp",
   primaryHandleRaw: string,
@@ -449,21 +471,21 @@ async function attemptAutoLink(
   if (!conv) return;
   if (conv.person_id) return;
 
-  const rawHandle = (primaryHandleRaw ?? "").trim();
+  const rawHandle = (primaryHandleRaw ?? '').trim();
   if (!rawHandle) {
-    await updateLinkState(supabaseAdmin, conversationId, "unlinked", null, {});
+    await updateLinkState(supabaseAdmin, conversationId, 'unlinked', null, {});
     return;
   }
 
-  const primaryHandle =
-    channel === "email" ? rawHandle.toLowerCase() : rawHandle;
+  // Normalize email handles to a bare lowercase value (trim + lowercase).
+  const primaryHandle = channel === 'email' ? normalizeEmail(rawHandle) : rawHandle;
   if (!primaryHandle) {
-    await updateLinkState(supabaseAdmin, conversationId, "unlinked", null, {});
+    await updateLinkState(supabaseAdmin, conversationId, 'unlinked', null, {});
     return;
   }
 
-  const matchColumn = channel === "email" ? "email" : "phone";
-  const matchTable = "customers";
+  const matchColumn = channel === 'email' ? 'email' : 'phone';
+  const matchTable = 'customers';
 
   let query = supabaseAdmin.from(matchTable).select("id");
   if (channel === "email") {
@@ -477,7 +499,7 @@ async function attemptAutoLink(
 
   if (matchErr) throw matchErr;
 
-  const ids = (matches ?? []).map((m: any) => m.id);
+  const ids = (matches ?? []).map((m: { id: string }) => m.id);
 
   if (ids.length === 1) {
     await updateLinkState(supabaseAdmin, conversationId, "linked", ids[0], {});
@@ -496,7 +518,7 @@ async function attemptAutoLink(
 }
 
 async function updateLinkState(
-  supabaseAdmin: any,
+  supabaseAdmin: SupabaseClient,
   conversationId: string,
   linkState: LinkState,
   personId: string | null,

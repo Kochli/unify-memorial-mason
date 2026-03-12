@@ -4,10 +4,11 @@ import { fetchMessagesByConversation, fetchMessagesByConversationIds } from '../
 import { fetchConversations } from '../api/inboxConversations.api';
 import { inboxKeys } from './useInboxConversations';
 import { sendTwilioMessage } from '../api/inboxTwilio.api';
-import { sendGmailReply } from '../api/inboxGmail.api';
+import { sendGmailReply, sendGmailFirstMessage } from '../api/inboxGmail.api';
 import { sendSmsReply } from '../api/inboxSms.api';
 import type { InboxMessage } from '../types/inbox.types';
 
+/** Thread messages refresh via Realtime invalidation (UnifiedInboxPage invalidates byConversation on INSERT/UPDATE); no interval polling. */
 export function useMessagesByConversation(conversationId: string | null) {
   return useQuery({
     queryKey: inboxKeys.messages.byConversation(conversationId!),
@@ -55,26 +56,36 @@ export function useSendReply() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ 
-      conversationId, 
-      bodyText, 
-      channel 
-    }: { 
-      conversationId: string; 
+    mutationFn: async ({
+      conversationId,
+      bodyText,
+      channel,
+      isFirstEmailMessage,
+      subject,
+    }: {
+      conversationId: string;
       bodyText: string;
       channel: 'email' | 'sms' | 'whatsapp';
+      isFirstEmailMessage?: boolean;
+      subject?: string | null;
     }) => {
-      // Validate body text (trim, reject empty)
       const trimmedBodyText = bodyText.trim();
       if (!trimmedBodyText) {
         throw new Error('Message body cannot be empty');
       }
 
-      // Route to appropriate service based on channel
       if (channel === 'email') {
+        if (isFirstEmailMessage) {
+          return await sendGmailFirstMessage({
+            conversationId,
+            bodyText: trimmedBodyText,
+            subject: subject ?? undefined,
+          });
+        }
         return await sendGmailReply({
           conversationId,
           bodyText: trimmedBodyText,
+          subject: subject ?? undefined,
         });
       }
       if (channel === 'sms') {

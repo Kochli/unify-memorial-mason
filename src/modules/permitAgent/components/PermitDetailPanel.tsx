@@ -10,6 +10,7 @@ import {
 import type { PermitPipelineItem } from '../types/permitAgent.types';
 import { PHASE_LABELS, PHASE_COLORS, PHASE_ORDER } from '../types/permitAgent.types';
 import { ActivityTracker } from './ActivityTracker';
+import { formatDateDMY } from '@/shared/lib/formatters';
 
 interface PermitDetailPanelProps {
   item: PermitPipelineItem;
@@ -101,11 +102,7 @@ export const PermitDetailPanel: React.FC<PermitDetailPanelProps> = ({
             <Calendar className="h-4 w-4 text-slate-400" />
             <span>
               {order.installation_date
-                ? new Date(order.installation_date).toLocaleDateString('en-GB', {
-                    day: 'numeric',
-                    month: 'short',
-                    year: 'numeric',
-                  })
+                ? formatDateDMY(order.installation_date)
                 : 'No install date'}
               {daysUntilInstall !== null && (
                 <span className={`ml-2 ${isUrgent ? 'text-red-600 font-medium' : 'text-slate-500'}`}>

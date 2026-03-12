@@ -26,6 +26,7 @@ import type { UIMemorial } from '@/modules/memorials/utils/memorialTransform';
 import { createCheckoutSession, createStripeInvoice, sendStripeInvoice, createInvoicePaymentLink } from '../api/stripe.api';
 import type { CreateStripeInvoiceResponse } from '../api/stripe.api';
 import { invoicesKeys, useInvoicePayments } from '../hooks/useInvoices';
+import { formatDateDMY, formatGbpDecimal, formatGbpPence } from '@/shared/lib/formatters';
 
 interface InvoiceDetailSidebarProps {
   invoice: Invoice | null;
@@ -52,11 +53,8 @@ function getStripePillClass(stripeStatus: string | null | undefined): string {
   }
 }
 
-/** Format pence to £X.XX */
-function formatPence(pence: number | null | undefined): string {
-  if (pence == null) return '—';
-  return `£${(pence / 100).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+// Use shared formatters for consistent GBP/date display across the app.
+const formatPence = formatGbpPence;
 
 export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({
   invoice,
@@ -262,13 +260,11 @@ export const InvoiceDetailSidebar: React.FC<InvoiceDetailSidebarProps> = ({
 
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    if (Number.isNaN(date.getTime())) return dateString;
-    return date.toLocaleDateString();
+    return formatDateDMY(dateString);
   };
 
   const formatCurrency = (amount: number) => {
-    return `£${amount.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return formatGbpDecimal(amount);
   };
 
   const handleAmountChange = (raw: string) => {

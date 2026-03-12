@@ -27,6 +27,7 @@ import type { ColumnState } from '@/shared/tableViewPresets/types/tableViewPrese
 import { invoiceColumnDefinitions } from '../components/invoiceColumnDefinitions';
 import { useToast } from '@/shared/hooks/use-toast';
 import { fetchInvoice } from '../api/invoicing.api';
+import { formatGbpDecimal } from '@/shared/lib/formatters';
 
 export const InvoicingPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState("all");
@@ -130,6 +131,25 @@ export const InvoicingPage: React.FC = () => {
       });
     })();
   }, [searchParams, queryClient, setSearchParams]);
+
+  // Deep-link/open invoice sidebar: ?invoice=<id> → open sidebar (used by Inbox "Open invoice")
+  useEffect(() => {
+    const invoiceId = searchParams.get('invoice');
+    const focus = searchParams.get('focus');
+    const pay = searchParams.get('pay');
+    const stripe = searchParams.get('stripe');
+
+    // Avoid clashing with other redirect flows handled elsewhere.
+    if (!invoiceId) return;
+    if (pay === 'success') return;
+    if (stripe === 'success') return;
+    if (focus === 'collect') return;
+    if (selectedInvoice?.id === invoiceId) return;
+
+    fetchInvoice(invoiceId)
+      .then((inv) => setSelectedInvoice(inv))
+      .catch(() => {});
+  }, [searchParams, selectedInvoice?.id]);
 
   // Load column state on mount: prefer localStorage (user's last session), else default preset
   useEffect(() => {
@@ -287,21 +307,21 @@ export const InvoicingPage: React.FC = () => {
     const totalOutstanding = uiInvoices
       .filter(inv => inv.status !== "paid" && inv.status !== "cancelled")
       .reduce((sum, inv) => {
-        const amount = parseFloat(inv.amount.replace('$', '').replace(/,/g, ''));
+        const amount = parseFloat(inv.amount.replace(/[^0-9.]/g, '').replace(/,/g, ''));
         return sum + (isNaN(amount) ? 0 : amount);
       }, 0);
 
     const totalPaid = uiInvoices
       .filter(inv => inv.status === "paid")
       .reduce((sum, inv) => {
-        const amount = parseFloat(inv.amount.replace('$', '').replace(/,/g, ''));
+        const amount = parseFloat(inv.amount.replace(/[^0-9.]/g, '').replace(/,/g, ''));
         return sum + (isNaN(amount) ? 0 : amount);
       }, 0);
 
     const overdueCount = uiInvoices.filter(inv => inv.status === "overdue").length;
     
     const totalAmount = uiInvoices.reduce((sum, inv) => {
-      const amount = parseFloat(inv.amount.replace('$', '').replace(/,/g, ''));
+      const amount = parseFloat(inv.amount.replace(/[^0-9.]/g, '').replace(/,/g, ''));
       return sum + (isNaN(amount) ? 0 : amount);
     }, 0);
 
@@ -386,7 +406,7 @@ export const InvoicingPage: React.FC = () => {
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-2xl font-bold">${stats.totalOutstanding.toLocaleString()}</div>
+                <div className="text-2xl font-bold">{formatGbpDecimal(stats.totalOutstanding)}</div>
                 <p className="text-sm text-slate-600">Outstanding</p>
               </div>
               <div className="h-8 w-8 bg-yellow-100 rounded-full flex items-center justify-center">
@@ -412,7 +432,7 @@ export const InvoicingPage: React.FC = () => {
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-2xl font-bold text-green-600">${stats.totalPaid.toLocaleString()}</div>
+                <div className="text-2xl font-bold text-green-600">{formatGbpDecimal(stats.totalPaid)}</div>
                 <p className="text-sm text-slate-600">Paid This Month</p>
               </div>
               <div className="h-8 w-8 bg-green-100 rounded-full flex items-center justify-center">
@@ -619,7 +639,17 @@ export const InvoicingPage: React.FC = () => {
       {/* Invoice Detail Sidebar */}
       <InvoiceDetailSidebar
         invoice={selectedInvoice}
-        onClose={() => setSelectedInvoice(null)}
+        onClose={() => {
+          setSelectedInvoice(null);
+          // If the sidebar was opened via ?invoice=..., clear it so it doesn't immediately reopen.
+          setSearchParams((prev) => {
+            if (!prev.get('invoice')) return prev;
+            const next = new URLSearchParams(prev);
+            next.delete('invoice');
+            next.delete('focus');
+            return next;
+          });
+        }}
         onReviseInvoice={(inv) => {
           setInvoiceToRevise(inv);
           setReviseModalOpen(true);

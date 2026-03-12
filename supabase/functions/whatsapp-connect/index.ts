@@ -5,7 +5,7 @@ import { encryptSecret } from './whatsappCrypto.ts';
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'authorization, content-type',
+  'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info',
 };
 
 interface ConnectBody {
@@ -17,25 +17,9 @@ interface ConnectBody {
 
 function normalizeWhatsAppFrom(v: string): string {
   const s = (v ?? '').trim().replace(/^whatsapp:/, '');
-  return s || '';
-}
-
-function validateTwilioCredentials(
-  accountSid: string,
-  apiKeySid: string,
-  apiKeySecret: string
-): Promise<{ ok: boolean; error?: string }> {
-  const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}.json`;
-  const auth = btoa(`${apiKeySid}:${apiKeySecret}`);
-  return fetch(url, {
-    method: 'GET',
-    headers: { Authorization: `Basic ${auth}` },
-  })
-    .then((res) => {
-      if (res.ok) return { ok: true };
-      return res.text().then((t) => ({ ok: false, error: t || res.statusText }));
-    })
-    .catch((e) => ({ ok: false, error: e instanceof Error ? e.message : 'Network error' }));
+  if (!s) return '';
+  // Always store with whatsapp: prefix so downstream Twilio logic has a consistent format.
+  return s.startsWith('whatsapp:') ? s : `whatsapp:${s}`;
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -72,7 +56,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const keySid = (body.twilio_api_key_sid ?? '').trim();
   const secret = (body.twilio_api_key_secret ?? '').trim();
   const fromRaw = (body.whatsapp_from ?? '').trim();
-  const whatsappFrom = normalizeWhatsAppFrom(fromRaw) || fromRaw;
+  const whatsappFrom = normalizeWhatsAppFrom(fromRaw);
 
   if (!sid || !keySid || !secret || !whatsappFrom) {
     return new Response(
@@ -83,10 +67,35 @@ Deno.serve(async (req: Request): Promise<Response> => {
     );
   }
 
-  const validation = await validateTwilioCredentials(sid, keySid, secret);
-  if (!validation.ok) {
+  // Local format validation only; live Twilio validation is handled explicitly via whatsapp-test.
+  const accountSidPattern = /^AC[a-zA-Z0-9]{32}$/;
+  const apiKeySidPattern = /^SK[a-zA-Z0-9]{32}$/;
+  const whatsappFromPattern = /^whatsapp:\+[1-9]\d{6,14}$/; // E.164 inside whatsapp: prefix
+
+  if (!accountSidPattern.test(sid)) {
     return new Response(
-      JSON.stringify({ error: validation.error ?? 'Invalid Twilio credentials' }),
+      JSON.stringify({ error: 'Invalid Twilio Account SID format' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  if (!apiKeySidPattern.test(keySid)) {
+    return new Response(
+      JSON.stringify({ error: 'Invalid Twilio API Key SID format' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  if (!secret) {
+    return new Response(
+      JSON.stringify({ error: 'API Key Secret must be non-empty' }),
+      { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+
+  if (!whatsappFromPattern.test(whatsappFrom)) {
+    return new Response(
+      JSON.stringify({ error: 'Invalid whatsapp_from format. Expected whatsapp:+<E.164 number>' }),
       { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

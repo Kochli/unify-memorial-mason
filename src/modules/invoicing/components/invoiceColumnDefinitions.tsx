@@ -11,6 +11,7 @@ import { invoicesKeys } from '../hooks/useInvoices';
 import type { Invoice } from '../types/invoicing.types';
 import type { UIInvoice } from '../utils/invoiceTransform';
 import { formatPence } from '../utils/invoiceAmounts';
+import { formatDateDMY } from '@/shared/lib/formatters';
 
 function StripePaymentLinkCell({
   invoice,
@@ -254,6 +255,36 @@ export const invoiceColumnDefinitions: InvoiceColumnDefinition[] = [
     ),
   },
   {
+    id: 'mainProductTotal',
+    label: 'Main product total',
+    defaultWidth: 160,
+    sortable: false,
+    renderHeader: () => <div>Main product total</div>,
+    renderCell: (invoice) => (
+      <TableCell className="text-sm">{invoice.mainProductTotal}</TableCell>
+    ),
+  },
+  {
+    id: 'additionalOptionsTotal',
+    label: 'Additional Options total',
+    defaultWidth: 180,
+    sortable: false,
+    renderHeader: () => <div>Additional Options total</div>,
+    renderCell: (invoice) => (
+      <TableCell className="text-sm">{invoice.additionalOptionsTotal}</TableCell>
+    ),
+  },
+  {
+    id: 'permitTotalCost',
+    label: 'Permit total cost',
+    defaultWidth: 150,
+    sortable: false,
+    renderHeader: () => <div>Permit total cost</div>,
+    renderCell: (invoice) => (
+      <TableCell className="text-sm">{invoice.permitTotalCost}</TableCell>
+    ),
+  },
+  {
     id: 'paid',
     label: 'Paid',
     defaultWidth: 140,
@@ -356,7 +387,7 @@ export const invoiceColumnDefinitions: InvoiceColumnDefinition[] = [
     sortable: true,
     renderHeader: () => <div>Due Date</div>,
     renderCell: (invoice) => (
-      <TableCell>{invoice.dueDate}</TableCell>
+      <TableCell>{formatDateDMY(invoice.dueDate)}</TableCell>
     ),
   },
   {

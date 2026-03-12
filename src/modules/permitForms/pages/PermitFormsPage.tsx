@@ -10,13 +10,10 @@ import type { PermitForm } from '../api/permitForms.api';
 import { CreatePermitFormDrawer } from '../components/CreatePermitFormDrawer';
 import { EditPermitFormDrawer } from '../components/EditPermitFormDrawer';
 import { DeletePermitFormDialog } from '../components/DeletePermitFormDialog';
+import { formatDateDMY } from '@/shared/lib/formatters';
 
 function formatDate(dateString: string) {
-  return new Date(dateString).toLocaleDateString('en-GB', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  });
+  return formatDateDMY(dateString);
 }
 
 export const PermitFormsPage: React.FC = () => {

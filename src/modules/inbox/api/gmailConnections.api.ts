@@ -37,9 +37,6 @@ export async function getGmailOAuthUrl(): Promise<string> {
     throw new Error('You must be signed in to connect Gmail');
   }
 
-  // Temporary debug: verify we have a real user JWT (JWTs start with eyJ)
-  console.log('JWT prefix:', session.access_token.slice(0, 10));
-
   const { data, error } = await supabase.functions.invoke<{ url: string }>('gmail-oauth-start', {
     headers: {
       Authorization: `Bearer ${session.access_token}`,

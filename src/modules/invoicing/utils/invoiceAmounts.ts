@@ -1,4 +1,5 @@
 import type { Invoice } from '../types/invoicing.types';
+import { formatGbpDecimal as sharedFormatGbpDecimal, formatGbpPence } from '@/shared/lib/formatters';
 
 export type DerivedInvoiceStatus = 'paid' | 'partial' | 'pending' | 'unknown';
 
@@ -9,11 +10,12 @@ export function parsePence(value: unknown): number | null {
 }
 
 export function formatPence(pence: number | null | undefined): string {
-  if (pence == null) return '—';
-  return `£${(pence / 100).toLocaleString('en-GB', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+  return formatGbpPence(pence);
+}
+
+/** Format a GBP decimal amount (e.g. order-derived numeric totals). */
+export function formatGbpDecimal(value: number | string | null | undefined): string {
+  return sharedFormatGbpDecimal(value);
 }
 
 export function computeTotals(invoice: Invoice): {

@@ -2,6 +2,7 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/shared/lib/supabase";
 import { Card, CardHeader, CardTitle, CardContent } from "@/shared/components/ui/card";
+import { formatDateTimeDMY } from "@/shared/lib/formatters";
 
 interface ActivityLogItem {
   id: string;
@@ -52,7 +53,7 @@ export const ActivityPage: React.FC = () => {
                 {data.map((log) => (
                   <li key={log.id} className="border-b pb-2 last:border-b-0">
                     <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>{new Date(log.created_at).toLocaleString()}</span>
+                      <span>{formatDateTimeDMY(log.created_at, { withTime: true, withSeconds: false, use12Hour: false })}</span>
                       <span>
                         {log.entity_type} · {log.action}
                       </span>

@@ -1,5 +1,5 @@
 import type { Invoice } from '../types/invoicing.types';
-import { computeTotals, computeDerivedStatus, type DerivedInvoiceStatus } from './invoiceAmounts';
+import { computeTotals, computeDerivedStatus, type DerivedInvoiceStatus, formatGbpDecimal } from './invoiceAmounts';
 
 // UI-friendly invoice format (for display in tables)
 export interface UIInvoice {
@@ -26,6 +26,9 @@ export interface UIInvoice {
   totalPence: number | null;
   derivedStatus: DerivedInvoiceStatus;
   hostedInvoiceUrl: string | null;
+  mainProductTotal: string;
+  additionalOptionsTotal: string;
+  permitTotalCost: string;
 }
 
 /**
@@ -51,7 +54,7 @@ export function transformInvoiceForUI(invoice: Invoice): UIInvoice {
     invoiceNumber: invoice.invoice_number,
     orderId: invoice.order_id ?? null, // Handle undefined: always string | null, never undefined
     customer: invoice.customer_name || 'No person assigned',
-    amount: `$${invoice.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+    amount: formatGbpDecimal(invoice.amount),
     status: displayStatus,
     dueDate: invoice.due_date,
     issueDate: invoice.issue_date,
@@ -69,6 +72,9 @@ export function transformInvoiceForUI(invoice: Invoice): UIInvoice {
     totalPence,
     derivedStatus,
     hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
+    mainProductTotal: formatGbpDecimal(invoice.main_product_total ?? null),
+    additionalOptionsTotal: formatGbpDecimal(invoice.additional_options_total ?? null),
+    permitTotalCost: formatGbpDecimal(invoice.permit_total_cost ?? null),
   };
 }
 

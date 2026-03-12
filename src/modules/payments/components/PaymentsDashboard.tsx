@@ -2,6 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { CreditCard, DollarSign, ArrowUpRight, CheckCircle2, Clock, Search, ShieldCheck, Zap, ArrowRight, Download, Plus, Settings, ExternalLink, Calculator, PieChart } from 'lucide-react';
 import { DUMMY_PAYMENTS, DUMMY_ORDERS } from '@/shared/lib/prototypeConstants';
+import { formatGbpDecimal } from '@/shared/lib/formatters';
 
 interface PaymentsDashboardProps {
   onViewOrder: (orderId: string) => void;
@@ -39,20 +40,20 @@ const PaymentsDashboard: React.FC<PaymentsDashboardProps> = ({ onViewOrder }) =>
         <div className="flex items-center gap-4 xl:gap-8 flex-wrap">
            <div className="flex flex-col items-end">
              <p className="text-[10px] xl:text-[11px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Contract Value</p>
-             <span className="text-xl xl:text-3xl font-black text-slate-900 tracking-tighter">£{totalValue.toLocaleString()}</span>
+             <span className="text-xl xl:text-3xl font-black text-slate-900 tracking-tighter">{formatGbpDecimal(totalValue)}</span>
            </div>
            <div className="w-px h-10 bg-slate-200" />
            <div className="flex flex-col items-end">
              <p className="text-[10px] xl:text-[11px] font-black text-slate-400 uppercase tracking-widest mb-1 text-green-600">Total Collected</p>
              <div className="flex items-center gap-2">
-                <span className="text-xl xl:text-3xl font-black text-green-600 tracking-tighter">£{totalPaid.toLocaleString()}</span>
+                <span className="text-xl xl:text-3xl font-black text-green-600 tracking-tighter">{formatGbpDecimal(totalPaid)}</span>
                 <div className="p-1 bg-green-50 rounded-lg text-green-600"><ArrowUpRight className="w-3.5 h-3.5" /></div>
              </div>
            </div>
            <div className="w-px h-10 bg-slate-200" />
            <div className="flex flex-col items-end">
              <p className="text-[10px] xl:text-[11px] font-black text-slate-400 uppercase tracking-widest mb-1 text-orange-500">Outstanding Balance</p>
-             <span className="text-xl xl:text-3xl font-black text-orange-500 tracking-tighter">£{totalBalance.toLocaleString()}</span>
+             <span className="text-xl xl:text-3xl font-black text-orange-500 tracking-tighter">{formatGbpDecimal(totalBalance)}</span>
            </div>
         </div>
       </div>
@@ -71,7 +72,7 @@ const PaymentsDashboard: React.FC<PaymentsDashboardProps> = ({ onViewOrder }) =>
                 </div>
               </div>
               <p className="text-sm font-black text-white/50 uppercase tracking-widest mb-1">Available for Payout</p>
-              <h4 className="text-3xl xl:text-5xl font-black tracking-tighter">£{(totalPaid * 0.9).toLocaleString(undefined, { minimumFractionDigits: 2 })}</h4>
+              <h4 className="text-3xl xl:text-5xl font-black tracking-tighter">{formatGbpDecimal(totalPaid * 0.9)}</h4>
               <p className="text-xs text-white/30 font-medium mt-4">Calculated from <span className="text-white/70">settled transactions</span> minus fees.</p>
             </div>
             <div className="relative z-10 mt-8 xl:mt-16 flex justify-between items-center">
@@ -133,19 +134,19 @@ const PaymentsDashboard: React.FC<PaymentsDashboardProps> = ({ onViewOrder }) =>
                     <span className="font-mono text-[11px] font-bold text-indigo-500 bg-indigo-50/50 px-2 py-1 rounded-lg">{order.id}</span>
                   </td>
                   <td className="px-4 lg:px-6 xl:px-10 py-4 xl:py-6">
-                    <p className="text-xs font-black text-slate-900">£{total.toLocaleString()}</p>
-                    <p className="text-[10px] text-green-600 font-bold uppercase mt-0.5">Paid: £{paid.toLocaleString()}</p>
+                    <p className="text-xs font-black text-slate-900">{formatGbpDecimal(total)}</p>
+                    <p className="text-[10px] text-green-600 font-bold uppercase mt-0.5">Paid: {formatGbpDecimal(paid)}</p>
                   </td>
                   <td className="px-4 lg:px-6 xl:px-10 py-4 xl:py-6">
                     <span className={`inline-flex items-center gap-2 px-2 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
                       balance === 0 ? 'bg-green-50 text-green-600 border border-green-100' : 'bg-orange-50 text-orange-600 border border-orange-100'
                     }`}>
                       {balance === 0 ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Calculator className="w-3.5 h-3.5" />}
-                      {balance === 0 ? 'Settled' : `£${balance.toLocaleString()}`}
+                      {balance === 0 ? 'Settled' : formatGbpDecimal(balance)}
                     </span>
                   </td>
                   <td className="px-4 lg:px-6 xl:px-10 py-4 xl:py-6 text-right">
-                    <span className="text-base xl:text-lg font-black text-slate-900">£{paid.toLocaleString()}</span>
+                    <span className="text-base xl:text-lg font-black text-slate-900">{formatGbpDecimal(paid)}</span>
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Latest Capture</p>
                   </td>
                 </tr>

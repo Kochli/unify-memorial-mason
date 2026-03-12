@@ -13,6 +13,8 @@ import {
 } from '@/shared/components/ui/form';
 import { Input } from '@/shared/components/ui/input';
 import { Textarea } from '@/shared/components/ui/textarea';
+import { Popover, PopoverContent, PopoverTrigger } from '@/shared/components/ui/popover';
+import { Calendar } from '@/shared/components/ui/calendar';
 import {
   Select,
   SelectContent,
@@ -21,6 +23,7 @@ import {
   SelectValue,
 } from '@/shared/components/ui/select';
 import { Button } from '@/shared/components/ui/button';
+import { Calendar as CalendarIcon } from 'lucide-react';
 import { useCreateInvoice, invoicesKeys } from '../hooks/useInvoices';
 import { invoiceFormSchema, type InvoiceFormData } from '../schemas/invoice.schema';
 import { ensureStripeInvoice } from '../utils/ensureStripeInvoice';
@@ -35,6 +38,8 @@ import type { Order } from '@/modules/orders/types/orders.types';
 import { toMoneyNumber } from '@/modules/orders/utils/numberParsing';
 import { useGeocodeOrderAddress } from '@/modules/orders/hooks/useGeocodeOrderAddress';
 import { getDefaultDueDate } from '../utils/dateDefaults';
+import { cn } from '@/shared/lib/utils';
+import { formatDateDMY } from '@/shared/lib/formatters';
 
 interface CreateInvoiceDrawerProps {
   open: boolean;
@@ -58,6 +63,27 @@ const buildNotes = (dimensions: string, notes: string): string | null => {
 
 // Sentinel value for "no person selected" in Radix Select (cannot use empty string)
 const NO_PERSON_SENTINEL = '__none__';
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+function ymdToDate(value: string): Date | undefined {
+  if (!value) return undefined;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) return undefined;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return undefined;
+  // Construct as local date to avoid timezone shifting.
+  const d = new Date(year, month - 1, day);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
+function dateToYmd(date: Date): string {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
 
 /**
  * Calculate the total cost of inline additional options from form data
@@ -498,7 +524,7 @@ export const CreateInvoiceDrawer: React.FC<CreateInvoiceDrawerProps> = ({
                 <h3 className="text-sm font-semibold">Invoice Details</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <FormItem>
-                    <FormLabel>Amount ($) *</FormLabel>
+                    <FormLabel>Amount (£) *</FormLabel>
                     <FormControl>
                       <Input
                         type="number"
@@ -553,13 +579,36 @@ export const CreateInvoiceDrawer: React.FC<CreateInvoiceDrawerProps> = ({
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Issue Date</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="date"
-                            value={field.value || ''}
-                            onChange={(e) => field.onChange(e.target.value || '')}
-                          />
-                        </FormControl>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <FormControl>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className={cn(
+                                  'h-9 w-full pl-3 pr-2 text-left font-normal text-xs',
+                                  !field.value && 'text-muted-foreground'
+                                )}
+                              >
+                                {field.value ? (
+                                  <span>{formatDateDMY(field.value)}</span>
+                                ) : (
+                                  <span>Pick a date</span>
+                                )}
+                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                              </Button>
+                            </FormControl>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                              mode="single"
+                              selected={field.value ? ymdToDate(field.value) : undefined}
+                              onSelect={(date) => field.onChange(date ? dateToYmd(date) : '')}
+                              disabled={(date) => date < new Date('1900-01-01')}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -570,13 +619,36 @@ export const CreateInvoiceDrawer: React.FC<CreateInvoiceDrawerProps> = ({
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Due Date *</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="date"
-                            value={field.value ?? ''}
-                            onChange={(e) => field.onChange(e.target.value || '')}
-                          />
-                        </FormControl>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <FormControl>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className={cn(
+                                  'h-9 w-full pl-3 pr-2 text-left font-normal text-xs',
+                                  !field.value && 'text-muted-foreground'
+                                )}
+                              >
+                                {field.value ? (
+                                  <span>{formatDateDMY(field.value)}</span>
+                                ) : (
+                                  <span>Pick a date</span>
+                                )}
+                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                              </Button>
+                            </FormControl>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                              mode="single"
+                              selected={field.value ? ymdToDate(field.value) : undefined}
+                              onSelect={(date) => field.onChange(date ? dateToYmd(date) : '')}
+                              disabled={(date) => date < new Date('1900-01-01')}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -620,13 +692,36 @@ export const CreateInvoiceDrawer: React.FC<CreateInvoiceDrawerProps> = ({
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Payment Date</FormLabel>
-                        <FormControl>
-                          <Input
-                            type="date"
-                            value={field.value || ''}
-                            onChange={(e) => field.onChange(e.target.value || null)}
-                          />
-                        </FormControl>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <FormControl>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className={cn(
+                                  'h-9 w-full pl-3 pr-2 text-left font-normal text-xs',
+                                  !field.value && 'text-muted-foreground'
+                                )}
+                              >
+                                {field.value ? (
+                                  <span>{formatDateDMY(field.value)}</span>
+                                ) : (
+                                  <span>Pick a date</span>
+                                )}
+                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                              </Button>
+                            </FormControl>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                              mode="single"
+                              selected={field.value ? ymdToDate(field.value) : undefined}
+                              onSelect={(date) => field.onChange(date ? dateToYmd(date) : null)}
+                              disabled={(date) => date < new Date('1900-01-01')}
+                              initialFocus
+                            />
+                          </PopoverContent>
+                        </Popover>
                         <FormMessage />
                       </FormItem>
                     )}

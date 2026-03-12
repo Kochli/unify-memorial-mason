@@ -13,6 +13,8 @@ import {
 } from '@/shared/components/ui/form';
 import { Input } from '@/shared/components/ui/input';
 import { Textarea } from '@/shared/components/ui/textarea';
+import { Popover, PopoverContent, PopoverTrigger } from '@/shared/components/ui/popover';
+import { Calendar } from '@/shared/components/ui/calendar';
 import {
   Select,
   SelectContent,
@@ -23,6 +25,7 @@ import {
 import { Button } from '@/shared/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card';
 import { Badge } from '@/shared/components/ui/badge';
+import { Calendar as CalendarIcon } from 'lucide-react';
 import { useUpdateInvoice } from '../hooks/useInvoices';
 import { invoiceFormSchema, type InvoiceFormData } from '../schemas/invoice.schema';
 import { useToast } from '@/shared/hooks/use-toast';
@@ -31,6 +34,28 @@ import { getOrderTotal, getOrderTotalFormatted, getOrderBaseValue, getOrderPermi
 import { getOrderDisplayIdShort } from '@/modules/orders/utils/orderDisplayId';
 import type { Invoice } from '../types/invoicing.types';
 import type { Order } from '@/modules/orders/types/orders.types';
+import { formatDateDMY, formatGbpDecimal } from '@/shared/lib/formatters';
+import { cn } from '@/shared/lib/utils';
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+function ymdToDate(value: string): Date | undefined {
+  if (!value) return undefined;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) return undefined;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return undefined;
+  const d = new Date(year, month - 1, day);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
+function dateToYmd(date: Date): string {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
 
 interface EditInvoiceDrawerProps {
   open: boolean;
@@ -201,14 +226,14 @@ export const EditInvoiceDrawer: React.FC<EditInvoiceDrawerProps> = ({
                             <div className="flex justify-between text-sm">
                               <span className="text-muted-foreground">Base Value:</span>
                               <span className="font-medium">
-                                £{getOrderBaseValue(order).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                {formatGbpDecimal(getOrderBaseValue(order))}
                               </span>
                             </div>
                             {getOrderPermitCost(order) > 0 && (
                               <div className="flex justify-between text-sm">
                                 <span className="text-muted-foreground">Permit Cost:</span>
                                 <span className="font-medium">
-                                  £{getOrderPermitCost(order).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  {formatGbpDecimal(getOrderPermitCost(order))}
                                 </span>
                               </div>
                             )}
@@ -216,7 +241,7 @@ export const EditInvoiceDrawer: React.FC<EditInvoiceDrawerProps> = ({
                               <div className="flex justify-between text-sm">
                                 <span className="text-muted-foreground">Additional Options:</span>
                                 <span className="font-medium">
-                                  £{getOrderAdditionalOptionsTotal(order).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  {formatGbpDecimal(getOrderAdditionalOptionsTotal(order))}
                                 </span>
                               </div>
                             )}
@@ -324,13 +349,36 @@ export const EditInvoiceDrawer: React.FC<EditInvoiceDrawerProps> = ({
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Issue Date</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="date"
-                          value={field.value || ''}
-                          onChange={(e) => field.onChange(e.target.value || '')}
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <FormControl>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className={cn(
+                              'h-9 w-full pl-3 pr-2 text-left font-normal text-xs',
+                              !field.value && 'text-muted-foreground'
+                            )}
+                          >
+                            {field.value ? (
+                              <span>{formatDateDMY(field.value)}</span>
+                            ) : (
+                              <span>Pick a date</span>
+                            )}
+                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                          </Button>
+                        </FormControl>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={field.value ? ymdToDate(field.value) : undefined}
+                          onSelect={(date) => field.onChange(date ? dateToYmd(date) : '')}
+                          disabled={(date) => date < new Date('1900-01-01')}
+                          initialFocus
                         />
-                      </FormControl>
+                      </PopoverContent>
+                    </Popover>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -341,13 +389,36 @@ export const EditInvoiceDrawer: React.FC<EditInvoiceDrawerProps> = ({
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Due Date *</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="date"
-                          value={field.value || ''}
-                          onChange={(e) => field.onChange(e.target.value || '')}
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <FormControl>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className={cn(
+                              'h-9 w-full pl-3 pr-2 text-left font-normal text-xs',
+                              !field.value && 'text-muted-foreground'
+                            )}
+                          >
+                            {field.value ? (
+                              <span>{formatDateDMY(field.value)}</span>
+                            ) : (
+                              <span>Pick a date</span>
+                            )}
+                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                          </Button>
+                        </FormControl>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={field.value ? ymdToDate(field.value) : undefined}
+                          onSelect={(date) => field.onChange(date ? dateToYmd(date) : '')}
+                          disabled={(date) => date < new Date('1900-01-01')}
+                          initialFocus
                         />
-                      </FormControl>
+                      </PopoverContent>
+                    </Popover>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -391,13 +462,36 @@ export const EditInvoiceDrawer: React.FC<EditInvoiceDrawerProps> = ({
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Payment Date</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="date"
-                          value={field.value || ''}
-                          onChange={(e) => field.onChange(e.target.value || null)}
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <FormControl>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className={cn(
+                              'h-9 w-full pl-3 pr-2 text-left font-normal text-xs',
+                              !field.value && 'text-muted-foreground'
+                            )}
+                          >
+                            {field.value ? (
+                              <span>{formatDateDMY(field.value)}</span>
+                            ) : (
+                              <span>Pick a date</span>
+                            )}
+                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                          </Button>
+                        </FormControl>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={field.value ? ymdToDate(field.value) : undefined}
+                          onSelect={(date) => field.onChange(date ? dateToYmd(date) : null)}
+                          disabled={(date) => date < new Date('1900-01-01')}
+                          initialFocus
                         />
-                      </FormControl>
+                      </PopoverContent>
+                    </Popover>
                       <FormMessage />
                     </FormItem>
                   )}

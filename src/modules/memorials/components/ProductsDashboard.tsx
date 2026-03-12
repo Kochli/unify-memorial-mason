@@ -2,6 +2,7 @@
 import React from 'react';
 import { Package, Search, Plus, SlidersHorizontal, Layers } from 'lucide-react';
 import { DUMMY_PRODUCTS } from '@/shared/lib/prototypeConstants';
+import { formatGbpDecimal } from '@/shared/lib/formatters';
 
 const ProductsDashboard: React.FC = () => {
   return (
@@ -53,7 +54,7 @@ const ProductsDashboard: React.FC = () => {
                     {product.category}
                   </span>
                 </td>
-                <td className="px-6 py-4 font-bold text-slate-900">£{product.price.toLocaleString()}</td>
+                <td className="px-6 py-4 font-bold text-slate-900">{formatGbpDecimal(product.price)}</td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2">
                     <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">

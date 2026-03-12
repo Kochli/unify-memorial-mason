@@ -5,10 +5,11 @@ import { normalizeOrder } from '../utils/numberParsing';
 export async function fetchOrders() {
   const { data, error } = await supabase
     .from('orders_with_options_total')
-    .select('*, customers(id, first_name, last_name)')
+    // Relation on view not supported by PostgREST; use select('*') like fetchOrdersByPersonId.
+    .select('*')
     .order('created_at', { ascending: false });
-  
-  if (error) throw error;
+
+  if (error) throw new Error(error.message ?? 'Failed to fetch orders');
   return (data || []).map(normalizeOrder);
 }
 
@@ -121,8 +122,27 @@ export async function upsertOrderPeople(
 export async function fetchOrdersByPersonId(personId: string) {
   const { data, error } = await supabase
     .from('orders_with_options_total')
-    .select('*, customers(id, first_name, last_name)')
+    // Note: selecting the customers relation from a VIEW caused Supabase
+    // to return an error for this query path. For the Inbox Orders tab we
+    // only need order-level fields, so we select from the view itself.
+    .select('*')
     .eq('person_id', personId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  return (data || []).map(normalizeOrder);
+}
+
+/**
+ * Fetch orders for multiple person IDs (e.g. for inbox list). Returns orders ordered by created_at desc.
+ * Used to derive one order display ID per person without N+1.
+ */
+export async function fetchOrdersByPersonIds(personIds: string[]): Promise<Order[]> {
+  if (personIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from('orders_with_options_total')
+    .select('*')
+    .in('person_id', personIds)
     .order('created_at', { ascending: false });
 
   if (error) throw error;
@@ -137,22 +157,12 @@ export async function fetchOrdersByPersonId(personId: string) {
 export async function fetchOrdersByInvoice(invoiceId: string) {
   const { data, error } = await supabase
     .from('orders_with_options_total')
-    .select('*, customers(id, first_name, last_name), order_additional_options(id, order_id, name, description, cost, created_at, updated_at)')
+    .select('*')
     .eq('invoice_id', invoiceId)
     .order('created_at', { ascending: false });
   
   if (error) throw error;
-  return (data || []).map((row: Record<string, unknown>) => {
-    const normalized = normalizeOrder(row);
-    const opts = row.order_additional_options as Array<{ id: string; order_id: string; name: string; description: string | null; cost: number; created_at: string; updated_at: string }> | undefined;
-    const additional_options = Array.isArray(opts)
-      ? opts.map((o) => ({
-          ...o,
-          cost: typeof o.cost === 'string' ? parseFloat(o.cost) : (o.cost ?? 0),
-        }))
-      : undefined;
-    return { ...normalized, ...(additional_options && { additional_options }) } as Order;
-  });
+  return (data || []).map(normalizeOrder);
 }
 
 export async function createOrder(order: OrderInsert) {

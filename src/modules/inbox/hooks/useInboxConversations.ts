@@ -2,13 +2,16 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchConversations,
   fetchConversation,
+  createConversation,
   updateConversation,
   markConversationsAsRead,
   markConversationsAsUnread,
   archiveConversations,
+  deleteConversations,
   linkConversation,
   unlinkConversation,
 } from '../api/inboxConversations.api';
+import type { CreateConversationPayload } from '../api/inboxConversations.api';
 import { syncGmail } from '../api/inboxGmail.api';
 import type { InboxConversation, ConversationFilters } from '../types/inbox.types';
 
@@ -74,6 +77,7 @@ function updateConversationUnreadCountInCache(
   return value;
 }
 
+/** List refreshes via Realtime invalidation and Gmail sync invalidation; no interval polling to avoid repeated requests. */
 export function useConversationsList(filters?: ConversationFilters) {
   return useQuery({
     queryKey: inboxKeys.conversations.lists(filters),
@@ -86,6 +90,18 @@ export function useConversation(id: string | null) {
     queryKey: inboxKeys.conversations.detail(id!),
     queryFn: () => fetchConversation(id!),
     enabled: !!id,
+  });
+}
+
+export function useCreateConversation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: CreateConversationPayload) => createConversation(payload),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+      queryClient.setQueryData(inboxKeys.conversations.detail(data.id), data);
+    },
   });
 }
 
@@ -161,6 +177,22 @@ export function useArchiveConversations() {
     onSuccess: () => {
       // Invalidate all conversation list queries
       queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+    },
+  });
+}
+
+export function useDeleteConversations() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (ids: string[]) => deleteConversations(ids),
+    onSuccess: (_data, ids) => {
+      // Invalidate lists and remove any now-stale detail/message caches.
+      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+      ids.forEach((id) => {
+        queryClient.removeQueries({ queryKey: inboxKeys.conversations.detail(id) });
+        queryClient.removeQueries({ queryKey: inboxKeys.messages.byConversation(id) });
+      });
     },
   });
 }

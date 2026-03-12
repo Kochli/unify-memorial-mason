@@ -11,6 +11,7 @@ import {
 import { DUMMY_MESSAGES, DUMMY_ORDERS, DUMMY_PRODUCTS } from '@/shared/lib/prototypeConstants';
 import { matchCemeteryEmailToOrderAI } from '@/shared/lib/geminiService';
 import VisualProof from '@/modules/inscriptions/components/VisualProof';
+import { formatGbpDecimal } from '@/shared/lib/formatters';
 
 interface ThreadMessage {
   id: string;
@@ -348,7 +349,7 @@ const UnifiedInbox: React.FC = () => {
                         </div>
                         <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
                            <span className="text-[10px] font-black text-slate-400 uppercase">Settlement</span>
-                           <span className="text-xs font-bold text-green-600">£{linkedOrder.paidAmount.toLocaleString()}</span>
+                           <span className="text-xs font-bold text-green-600">{formatGbpDecimal(linkedOrder.paidAmount)}</span>
                         </div>
                      </div>
                   </section>

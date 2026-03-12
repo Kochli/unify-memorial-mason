@@ -10,6 +10,7 @@ import { transformCompaniesFromDb, type UICompany } from '../utils/companyTransf
 import { CreateCompanyDrawer } from '../components/CreateCompanyDrawer';
 import { EditCompanyDrawer } from '../components/EditCompanyDrawer';
 import { DeleteCompanyDialog } from '../components/DeleteCompanyDialog';
+import { formatDateDMY } from '@/shared/lib/formatters';
 
 export const CompaniesPage: React.FC = () => {
   const { data: companiesData, isLoading, error, refetch } = useCompaniesList();
@@ -54,11 +55,7 @@ export const CompaniesPage: React.FC = () => {
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-GB', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
+    return formatDateDMY(dateString);
   };
 
   const renderTable = () => {

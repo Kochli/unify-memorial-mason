@@ -1,4 +1,11 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.49.4';
+import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.49.4';
+import {
+  parseEmailAddresses,
+  pickEmailForAutoLink,
+  pickPrimaryHandleEmail,
+  normalizeEmail,
+} from '../_shared/email.ts';
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -16,6 +23,67 @@ interface NewThreadRequest {
 interface GmailSendResponse {
   id: string;
   threadId: string;
+}
+
+type LinkState = 'linked' | 'unlinked' | 'ambiguous';
+
+async function attemptAutoLinkEmail(
+  supabaseAdmin: SupabaseClient,
+  conversationId: string,
+  emailRaw: string,
+): Promise<void> {
+  const email = normalizeEmail(emailRaw);
+  if (!email) return;
+
+  const { data: conv, error: convErr } = await supabaseAdmin
+    .from('inbox_conversations')
+    .select('id, person_id')
+    .eq('id', conversationId)
+    .maybeSingle();
+  if (convErr) throw convErr;
+  if (!conv) return;
+  if (conv.person_id) return;
+
+  // Case-insensitive exact match (no wildcards). We normalize input to lower-case.
+  const { data: matches, error: matchErr } = await supabaseAdmin
+    .from('customers')
+    .select('id')
+    .ilike('email', email);
+  if (matchErr) throw matchErr;
+
+  const ids = (matches ?? []).map((m: { id: string }) => m.id);
+
+  if (ids.length === 1) {
+    await updateLinkState(supabaseAdmin, conversationId, 'linked', ids[0], { matched_on: 'email' });
+    return;
+  }
+  if (ids.length > 1) {
+    await updateLinkState(supabaseAdmin, conversationId, 'ambiguous', null, {
+      matched_on: 'email',
+      candidates: ids,
+    });
+    return;
+  }
+
+  await updateLinkState(supabaseAdmin, conversationId, 'unlinked', null, { matched_on: 'email' });
+}
+
+async function updateLinkState(
+  supabaseAdmin: SupabaseClient,
+  conversationId: string,
+  linkState: LinkState,
+  personId: string | null,
+  linkMeta: Record<string, unknown>,
+) {
+  const { error } = await supabaseAdmin
+    .from('inbox_conversations')
+    .update({
+      person_id: personId,
+      link_state: linkState,
+      link_meta: linkMeta,
+    })
+    .eq('id', conversationId);
+  if (error) throw error;
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -172,12 +240,28 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const gmailData = await gmailResponse.json() as GmailSendResponse;
     const sentAt = new Date().toISOString();
 
+    const toEmails = parseEmailAddresses(trimmedTo);
+    const primaryHandle =
+      pickPrimaryHandleEmail({
+        direction: 'outbound',
+        fromEmails: [normalizeEmail(userEmail)],
+        toEmails,
+        userEmail,
+      }) ?? normalizeEmail(trimmedTo);
+
+    const emailForAutoLink = pickEmailForAutoLink({
+      direction: 'outbound',
+      fromEmails: [normalizeEmail(userEmail)],
+      toEmails,
+      userEmail,
+    });
+
     // Create inbox_conversation for the outbound thread
     const { data: conversation, error: convError } = await supabase
       .from('inbox_conversations')
       .insert({
         channel: 'email',
-        primary_handle: trimmedTo,
+        primary_handle: primaryHandle,
         subject: trimmedSubject,
         status: 'open',
         unread_count: 0,
@@ -224,6 +308,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (msgError) {
       console.error('Failed to insert inbox_message', msgError);
       // Non-fatal: email was sent and conversation created
+    }
+
+    // Auto-link to an existing customer by email when we can determine a safe canonical recipient.
+    if (emailForAutoLink) {
+      try {
+        await attemptAutoLinkEmail(supabase, conversation.id, emailForAutoLink);
+      } catch (e) {
+        console.error('inbox-gmail-new-thread: auto-link failed', e);
+      }
     }
 
     return new Response(

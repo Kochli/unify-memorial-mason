@@ -58,12 +58,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const supabase = createClient(supabaseUrl, serviceRoleKey);
 
   // Route WhatsApp/SMS to owner via whatsapp_connections (AccountSid + To). If no match, return 200 and do not create conversation.
-  const toNormalized = to.trim();
+  // For WhatsApp we must use the Twilio-style sender (whatsapp:+...) when matching whatsapp_from,
+  // while still using normalized handles for conversation/message identifiers.
+  const toForConnection = channel === 'whatsapp' ? rawTo.trim() : to.trim();
   const { data: connection } = await supabase
     .from('whatsapp_connections')
     .select('id, user_id')
     .eq('twilio_account_sid', accountSid)
-    .eq('whatsapp_from', toNormalized)
+    .eq('whatsapp_from', toForConnection)
     .eq('status', 'connected')
     .limit(1)
     .maybeSingle();
@@ -88,17 +90,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return new Response(twimlEmpty, { status: 200, headers: twimlHeaders });
   }
 
-  // Use normalized handles for canonical thread id
-  const canonical = [from.trim(), to.trim()].sort();
-  const externalThreadId = canonical.join('|');
-
+  // Match existing conversation by channel + primary_handle + status + owner (old inbox-twilio-inbound behavior).
+  // external_thread_id is still set on new inserts for consistency but not used for inbound lookup.
+  const primaryHandle = from.trim();
   let conversationId: string;
 
   const { data: existingConv } = await supabase
     .from('inbox_conversations')
     .select('id, last_message_at, unread_count, status, user_id')
     .eq('channel', channel)
-    .eq('external_thread_id', externalThreadId)
+    .eq('primary_handle', primaryHandle)
+    .eq('status', 'open')
+    .eq('user_id', ownerUserId)
     .limit(1)
     .maybeSingle();
 
@@ -113,17 +116,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
   } else {
     const sentAt = new Date().toISOString();
     const preview = body.slice(0, 120);
+    const externalThreadId = [primaryHandle, to.trim()].sort().join('|');
     const { data: newConv, error: createErr } = await supabase
       .from('inbox_conversations')
       .insert({
         channel,
-        primary_handle: from.trim(),
+        primary_handle: primaryHandle,
         external_thread_id: externalThreadId,
         subject: null,
         status: 'open',
         unread_count: 1,
         last_message_at: sentAt,
         last_message_preview: preview,
+        updated_at: sentAt,
         user_id: ownerUserId,
       })
       .select('id')
@@ -172,18 +177,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const preview = body.slice(0, 120);
   const updatePayload: Record<string, unknown> = {
+    last_message_at: sentAt,
     last_message_preview: preview,
     updated_at: sentAt,
   };
 
   if (existingConv) {
-    const prevAt = existingConv.last_message_at ? new Date(existingConv.last_message_at).getTime() : 0;
-    if (new Date(sentAt).getTime() > prevAt) {
-      updatePayload.last_message_at = sentAt;
-    }
-    if (existingConv.status === 'open') {
-      updatePayload.unread_count = (existingConv.unread_count ?? 0) + 1;
-    }
+    updatePayload.unread_count = (existingConv.unread_count ?? 0) + 1;
   }
 
   await supabase

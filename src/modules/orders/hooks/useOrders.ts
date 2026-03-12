@@ -1,9 +1,11 @@
+import { useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { 
   fetchOrders, 
   fetchOrder, 
   fetchOrdersByInvoice, 
   fetchOrdersByPersonId,
+  fetchOrdersByPersonIds,
   fetchOrderPeople,
   upsertOrderPeople,
   createOrder, 
@@ -24,6 +26,7 @@ export const ordersKeys = {
   detail: (id: string) => ['orders', id] as const,
   byInvoice: (invoiceId: string) => ['orders', 'byInvoice', invoiceId] as const,
   byPerson: (personId: string) => ['orders', 'byPerson', personId] as const,
+  byPersonIds: (personIds: string[]) => ['orders', 'byPersonIds', [...personIds].sort().join(',')] as const,
   personId: (orderId: string) => ['orders', 'personId', orderId] as const,
   personIdsByInvoice: (invoiceId: string) => ['orders', 'personIdsByInvoice', invoiceId] as const,
   additionalOptions: (orderId: string) => ['orders', 'additionalOptions', orderId] as const,
@@ -116,6 +119,18 @@ export function useOrdersByPersonId(personId: string | null | undefined) {
     queryKey: personId ? ordersKeys.byPerson(personId) : ['orders', 'byPerson', 'disabled'],
     queryFn: () => fetchOrdersByPersonId(personId!),
     enabled: !!personId,
+  });
+}
+
+/**
+ * Fetch orders for multiple person IDs (one query). Used e.g. by inbox list to show order ID per row.
+ */
+export function useOrdersByPersonIds(personIds: string[]) {
+  const stableIds = useMemo(() => [...new Set(personIds)].filter(Boolean).sort(), [personIds]);
+  return useQuery({
+    queryKey: stableIds.length > 0 ? ordersKeys.byPersonIds(stableIds) : ['orders', 'byPersonIds', 'disabled'],
+    queryFn: () => fetchOrdersByPersonIds(stableIds),
+    enabled: stableIds.length > 0,
   });
 }
 

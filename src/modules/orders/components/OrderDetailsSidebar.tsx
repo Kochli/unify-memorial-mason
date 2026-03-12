@@ -32,6 +32,7 @@ import { getOrderTotalFormatted, getOrderBaseValue, getOrderPermitCost, getOrder
 import { useInscriptionsByOrderId } from '@/modules/inscriptions/hooks/useInscriptions';
 import { usePermitForm } from '@/modules/permitForms/hooks/usePermitForms';
 import { getOrderDisplayId } from '../utils/orderDisplayId';
+import { formatDateTimeDMY, formatGbpDecimal } from '@/shared/lib/formatters';
 
 interface OrderDetailsSidebarProps {
   order: Order | null;
@@ -202,9 +203,7 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
 
   const formatMessageDate = (isoString: string) => {
     if (!isoString) return '';
-    const date = new Date(isoString);
-    if (Number.isNaN(date.getTime())) return isoString;
-    return date.toLocaleString();
+    return formatDateTimeDMY(isoString, { withTime: true, withSeconds: false, use12Hour: false });
   };
 
   return (
@@ -456,8 +455,8 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
                     {(() => {
                       const baseValue = getOrderBaseValue(currentOrder);
                       return baseValue > 0 
-                        ? `£${baseValue.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                        : '£0.00';
+                        ? formatGbpDecimal(baseValue)
+                        : formatGbpDecimal(0);
                     })()}
                   </span>
                 )}
@@ -477,8 +476,8 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
                 ) : (
                   <span className="font-medium">
                     {getOrderPermitCost(currentOrder) > 0 
-                      ? `£${getOrderPermitCost(currentOrder).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                      : '£0.00'}
+                      ? formatGbpDecimal(getOrderPermitCost(currentOrder))
+                      : formatGbpDecimal(0)}
                   </span>
                 )}
               </div>
@@ -503,7 +502,7 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
                           )}
                         </span>
                         <span className="font-medium">
-                          £{option.cost.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {formatGbpDecimal(option.cost)}
                         </span>
                       </div>
                     ))}
@@ -515,7 +514,7 @@ export const OrderDetailsSidebar: React.FC<OrderDetailsSidebarProps> = ({ order,
                     {isOptionsLoading ? (
                       <span className="text-muted-foreground">...</span>
                     ) : (
-                      `£${getOrderAdditionalOptionsTotal(currentOrder).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      formatGbpDecimal(getOrderAdditionalOptionsTotal(currentOrder))
                     )}
                   </span>
                 </div>
