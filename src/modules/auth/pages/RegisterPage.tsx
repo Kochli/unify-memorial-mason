@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '@/shared/lib/supabase';
-import { getAppUrl } from '@/shared/lib/appUrl';
 import { Button } from '@/shared/components/ui/button';
 import { Input } from '@/shared/components/ui/input';
 import { Label } from '@/shared/components/ui/label';
@@ -22,7 +21,7 @@ export function RegisterPage() {
       const { error: err } = await supabase.auth.signUp({
         email,
         password,
-        options: { emailRedirectTo: `${getAppUrl()}/auth/callback` },
+        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
       });
       if (err) throw err;
       setMessage('Check your email to confirm your account, then sign in.');
