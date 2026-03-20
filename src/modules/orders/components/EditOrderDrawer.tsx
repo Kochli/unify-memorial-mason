@@ -73,6 +73,34 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
   const [lastGeocodeResult, setLastGeocodeResult] = useState<{ ok: boolean; isManual: boolean } | null>(null);
   const [lastGeocodeLocation, setLastGeocodeLocation] = useState<string | null>(order.location || null);
 
+  const findMatchingProduct = (o: Order, productList: UIProduct[]): string => {
+    // Never throw; always return a safe productId string.
+    try {
+      // 1) Priority: match by order.value -> product.price
+      if (o.value != null && Number.isFinite(o.value)) {
+        const target = o.value;
+        const tolerance = 0.0001;
+        const byPrice = productList.find((p) => {
+          if (p.price == null || !Number.isFinite(p.price)) return false;
+          return Math.abs(p.price - target) <= tolerance;
+        });
+        if (byPrice?.id) return byPrice.id;
+      }
+
+      // 2) Fallback: match by stored product photo URL -> product.imageUrl
+      if (o.product_photo_url) {
+        const byImageUrl = productList.find(
+          (p) => p.imageUrl && p.imageUrl === o.product_photo_url
+        );
+        if (byImageUrl?.id) return byImageUrl.id;
+      }
+    } catch {
+      // Intentionally ignore matching errors; drawer should still open safely.
+    }
+
+    return "";
+  };
+
   const products = useMemo(() => {
     if (!productsData) return [];
     return transformProductsFromDb(productsData);
@@ -262,7 +290,7 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
   // Match product after products are loaded (separate effect to handle async loading)
   useEffect(() => {
     if (order && products.length > 0 && order.order_type === 'New Memorial') {
-      const matchedProductId = findMatchingProduct(order);
+      const matchedProductId = findMatchingProduct(order, products);
       setSelectedProductId(matchedProductId);
     } else if (order && order.order_type === 'Renovation') {
       // Clear product selection for Renovation orders

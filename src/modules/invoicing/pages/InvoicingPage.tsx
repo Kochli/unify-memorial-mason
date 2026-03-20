@@ -28,8 +28,26 @@ import { invoiceColumnDefinitions } from '../components/invoiceColumnDefinitions
 import { useToast } from '@/shared/hooks/use-toast';
 import { fetchInvoice } from '../api/invoicing.api';
 import { formatGbpDecimal } from '@/shared/lib/formatters';
+import { useIsMobile } from '@/shared/hooks/use-mobile';
+
+import {
+  DndContext,
+  DragEndEvent,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  horizontalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 export const InvoicingPage: React.FC = () => {
+  const isMobile = useIsMobile();
   const [activeTab, setActiveTab] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [createDrawerOpen, setCreateDrawerOpen] = useState(false);
@@ -236,6 +254,108 @@ export const InvoicingPage: React.FC = () => {
         return aIndex - bIndex;
       });
   }, [columnState]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  );
+
+  const computeNextOrderPreservingHidden = useCallback(
+    (fullOrder: string[], visibleIds: string[], activeId: string, overId: string) => {
+      if (activeId === overId) return fullOrder;
+
+      const visibleSet = new Set(visibleIds);
+      const visibleInFullOrder = fullOrder.filter((id) => visibleSet.has(id));
+      if (visibleInFullOrder.length !== visibleIds.length) return fullOrder;
+
+      const oldIndex = visibleInFullOrder.indexOf(activeId);
+      const newIndex = visibleInFullOrder.indexOf(overId);
+      if (oldIndex < 0 || newIndex < 0) return fullOrder;
+
+      const movedVisibleIds = arrayMove(visibleInFullOrder, oldIndex, newIndex);
+
+      let movedIndex = 0;
+      return fullOrder.map((id) => {
+        if (!visibleSet.has(id)) return id;
+        const nextId = movedVisibleIds[movedIndex];
+        movedIndex += 1;
+        return nextId ?? id;
+      });
+    },
+    []
+  );
+
+  const handleHeaderDragEnd = useCallback(
+    ({ active, over }: DragEndEvent) => {
+      if (isMobile) return;
+      if (!over) return;
+
+      const activeId = String(active.id);
+      const overId = String(over.id);
+
+      const fullOrder = columnState.order;
+      const visibleIds = visibleColumns.map((c) => c.id);
+      const nextOrder = computeNextOrderPreservingHidden(
+        fullOrder,
+        visibleIds,
+        activeId,
+        overId
+      );
+
+      const changed =
+        nextOrder.length !== fullOrder.length ||
+        nextOrder.some((id, i) => id !== fullOrder[i]);
+      if (!changed) return;
+
+      setColumnState((prev) => ({
+        ...prev,
+        order: nextOrder,
+      }));
+    },
+    [isMobile, columnState.order, visibleColumns, computeNextOrderPreservingHidden]
+  );
+
+  const SortableInvoiceHeaderCell: React.FC<{
+    column: (typeof visibleColumns)[number];
+    width: number;
+  }> = ({ column, width }) => {
+    const {
+      attributes,
+      listeners,
+      setNodeRef,
+      transform,
+      transition,
+      isDragging,
+    } = useSortable({ id: column.id });
+
+    const style: React.CSSProperties = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      opacity: isDragging ? 0.85 : 1,
+    };
+
+    return (
+      <TableHead
+        className="relative"
+        style={{ width: `${width}px`, minWidth: `${width}px` }}
+      >
+        <div
+          ref={setNodeRef}
+          style={style}
+          {...attributes}
+          {...listeners}
+          className="h-full pr-3 flex items-center"
+        >
+          {column.renderHeader()}
+        </div>
+        <div
+          ref={resizeRef}
+          className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-blue-500 bg-transparent"
+          onMouseDown={(e) => handleResizeStart(column.id, e)}
+          style={{ zIndex: 10 }}
+        />
+      </TableHead>
+    );
+  };
 
   // Column resizing handlers
   const handleResizeStart = useCallback((columnId: string, e: React.MouseEvent) => {
@@ -497,24 +617,48 @@ export const InvoicingPage: React.FC = () => {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      {visibleColumns.map((column) => {
-                        const width = columnState.widths[column.id] || column.defaultWidth;
-                        return (
-                          <TableHead 
-                            key={column.id} 
-                            className="relative"
-                            style={{ width: `${width}px`, minWidth: `${width}px` }}
+                      {isMobile ? (
+                        visibleColumns.map((column) => {
+                          const width = columnState.widths[column.id] || column.defaultWidth;
+                          return (
+                            <TableHead
+                              key={column.id}
+                              className="relative"
+                              style={{ width: `${width}px`, minWidth: `${width}px` }}
+                            >
+                              {column.renderHeader()}
+                              <div
+                                ref={resizeRef}
+                                className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-blue-500 bg-transparent"
+                                onMouseDown={(e) => handleResizeStart(column.id, e)}
+                                style={{ zIndex: 10 }}
+                              />
+                            </TableHead>
+                          );
+                        })
+                      ) : (
+                        <DndContext
+                          sensors={sensors}
+                          collisionDetection={closestCenter}
+                          onDragEnd={handleHeaderDragEnd}
+                        >
+                          <SortableContext
+                            items={visibleColumns.map((c) => c.id)}
+                            strategy={horizontalListSortingStrategy}
                           >
-                            {column.renderHeader()}
-                            <div
-                              ref={resizeRef}
-                              className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-blue-500 bg-transparent"
-                              onMouseDown={(e) => handleResizeStart(column.id, e)}
-                              style={{ zIndex: 10 }}
-                            />
-                          </TableHead>
-                        );
-                      })}
+                            {visibleColumns.map((column) => {
+                              const width = columnState.widths[column.id] || column.defaultWidth;
+                              return (
+                                <SortableInvoiceHeaderCell
+                                  key={column.id}
+                                  column={column}
+                                  width={width}
+                                />
+                              );
+                            })}
+                          </SortableContext>
+                        </DndContext>
+                      )}
                       <TableHead>Actions</TableHead>
                     </TableRow>
                   </TableHeader>

@@ -8,6 +8,8 @@ import { InboxConversationList, type ListFilter, type ChannelFilter } from "../c
 import { CustomerThreadList } from "../components/CustomerThreadList";
 import { CustomerConversationView } from "../components/CustomerConversationView";
 import { PersonOrdersPanel } from "../components/PersonOrdersPanel";
+import { useIsMobile } from "@/shared/hooks/use-mobile";
+import { MessageSquareText, Package, PanelLeftOpen, PanelRightClose } from "lucide-react";
 import {
   inboxKeys,
   useConversationsList,
@@ -30,6 +32,8 @@ const GMAIL_POLL_INTERVAL_MS = 10_000;
 const INBOX_FALLBACK_REFRESH_MS = 20_000;
 
 export const UnifiedInboxPage: React.FC = () => {
+  const isMobile = useIsMobile();
+
   const [viewMode, setViewMode] = useState<'conversations' | 'customers'>('conversations');
   const [listFilter, setListFilter] = useState<ListFilter>('all');
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>('all');
@@ -44,6 +48,73 @@ export const UnifiedInboxPage: React.FC = () => {
   const realtimePendingIdsRef = useRef<Set<string>>(new Set());
   const realtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const invalidateInFlightRef = useRef(false);
+
+  // Desktop-only collapsible side panels:
+  // - Left: conversations/customers list
+  // - Right: order context panel
+  // State is persisted per user via localStorage.
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
+
+  // Avoid showing rails during the first client render before mobile/desktop is known.
+  const [layoutReady, setLayoutReady] = useState(false);
+  useEffect(() => {
+    setLayoutReady(true);
+  }, []);
+
+  const effectiveLeftCollapsed = layoutReady && !isMobile && leftCollapsed;
+  const effectiveRightCollapsed = layoutReady && !isMobile && rightCollapsed;
+
+  const leftStorageKey = currentUserId
+    ? `inbox.desktop.leftCollapsed.v1.${currentUserId}`
+    : null;
+  const rightStorageKey = currentUserId
+    ? `inbox.desktop.rightCollapsed.v1.${currentUserId}`
+    : null;
+
+  // Resolve user id for per-user persistence.
+  useEffect(() => {
+    let cancelled = false;
+    supabase.auth
+      .getUser()
+      .then(({ data: { user } }) => {
+        if (cancelled) return;
+        setCurrentUserId(user?.id ?? "anon");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCurrentUserId("anon");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Load persisted collapsed state.
+  useEffect(() => {
+    if (!leftStorageKey || !rightStorageKey) return;
+    try {
+      const storedLeft = localStorage.getItem(leftStorageKey);
+      const storedRight = localStorage.getItem(rightStorageKey);
+      setLeftCollapsed(storedLeft === "true");
+      setRightCollapsed(storedRight === "true");
+    } catch {
+      // Keep defaults (both open).
+    }
+  }, [leftStorageKey, rightStorageKey]);
+
+  // Persist collapsed state (desktop only).
+  useEffect(() => {
+    if (!leftStorageKey || !rightStorageKey) return;
+    if (isMobile) return;
+    try {
+      localStorage.setItem(leftStorageKey, String(leftCollapsed));
+      localStorage.setItem(rightStorageKey, String(rightCollapsed));
+    } catch {
+      // Ignore persistence issues.
+    }
+  }, [leftStorageKey, rightStorageKey, isMobile, leftCollapsed, rightCollapsed]);
 
   const { data: selectedConversation } = useConversation(selectedConversationId);
   const activePersonId = (
@@ -489,88 +560,132 @@ export const UnifiedInboxPage: React.FC = () => {
         <div
           className={cn(
             'flex-1 min-h-0 grid grid-rows-1 gap-0 grid-cols-1 overflow-hidden',
-            'lg:grid-cols-[340px_minmax(0,1fr)_280px] xl:grid-cols-[360px_minmax(0,1fr)_300px]'
+            effectiveLeftCollapsed && effectiveRightCollapsed
+              ? 'lg:grid-cols-[56px_minmax(0,1fr)_56px] xl:grid-cols-[56px_minmax(0,1fr)_56px]'
+              : effectiveLeftCollapsed
+                ? 'lg:grid-cols-[56px_minmax(0,1fr)_280px] xl:grid-cols-[56px_minmax(0,1fr)_300px]'
+                : effectiveRightCollapsed
+                  ? 'lg:grid-cols-[340px_minmax(0,1fr)_56px] xl:grid-cols-[360px_minmax(0,1fr)_56px]'
+                  : 'lg:grid-cols-[340px_minmax(0,1fr)_280px] xl:grid-cols-[360px_minmax(0,1fr)_300px]'
           )}
         >
           {/* Column 1: Conversation list with filters and channel pills */}
-          <div className="min-h-0 h-full flex flex-col overflow-hidden border-r border-slate-200 bg-slate-100/60 p-2">
-            <div className="shrink-0 pb-2 flex items-center gap-1.5">
-              <button
-                type="button"
-                className={cn(
-                  'px-2 py-1 rounded-md text-xs font-medium border',
-                  viewMode === 'conversations'
-                    ? 'bg-emerald-700 text-white border-emerald-700'
-                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                )}
-                onClick={() => setViewMode('conversations')}
-              >
-                Conversations
-              </button>
-              <button
-                type="button"
-                className={cn(
-                  'px-2 py-1 rounded-md text-xs font-medium border',
-                  viewMode === 'customers'
-                    ? 'bg-emerald-700 text-white border-emerald-700'
-                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                )}
-                onClick={() => setViewMode('customers')}
-              >
-                Customers
-              </button>
-            </div>
-            {viewMode === 'conversations' ? (
-              <InboxConversationList
-                listFilter={listFilter}
-                channelFilter={channelFilter}
-                searchQuery={searchQuery}
-                onListFilterChange={setListFilter}
-                onChannelFilterChange={setChannelFilter}
-                onSearchChange={setSearchQuery}
-                conversations={displayConversations}
-                selectedConversationId={selectedConversationId}
-                selectedItems={selectedItems}
-                onSelectConversation={setSelectedConversationId}
-                onToggleSelection={toggleSelection}
-                onNewClick={() => setNewConversationModalOpen(true)}
-                onDeleteClick={handleDelete}
-                onToggleReadUnreadClick={handleToggleReadUnread}
-                deleteDisabled={selectedItems.length === 0 && !selectedConversationId}
-                toggleReadUnreadDisabled={
-                  toggleTargetIds.length === 0 ||
-                  markAsReadMutation.isPending ||
-                  markAsUnreadMutation.isPending
-                }
-                anyToggleTargetUnread={anyToggleTargetUnread}
-                isLoading={isLoading}
-                isError={isError}
-                hasGmailConnection={!!gmailConnection}
-              />
-            ) : (
-              <CustomerThreadList
-                listFilter={listFilter}
-                channelFilter={channelFilter}
-                searchQuery={searchQuery}
-                onListFilterChange={setListFilter}
-                onChannelFilterChange={setChannelFilter}
-                onSearchChange={setSearchQuery}
-                rows={customerRows}
-                selectedPersonId={selectedPersonId}
-                onSelectPerson={setSelectedPersonId}
-                isLoading={customersLoading}
-                isError={customersError}
-                onToggleReadUnreadClick={handleToggleReadUnread}
-                toggleReadUnreadDisabled={
-                  !selectedPersonId ||
-                  markAsReadMutation.isPending ||
-                  markAsUnreadMutation.isPending
-                }
-                selectedHasUnread={
-                  customerRows.find((row) => row.personId === selectedPersonId)?.hasUnread ?? false
-                }
-              />
+          <div
+            className={cn(
+              "min-h-0 h-full flex flex-col overflow-hidden border-r border-slate-200 bg-slate-100/60",
+              effectiveLeftCollapsed ? "p-1" : "p-2"
             )}
+          >
+            {/* Left panel content (kept mounted; only hidden when collapsed). */}
+            <div className={cn("flex flex-col min-h-0 overflow-hidden", effectiveLeftCollapsed && "hidden")}>
+              <div className="shrink-0 pb-2 flex items-center gap-1.5">
+                <button
+                  type="button"
+                  className={cn(
+                    'px-2 py-1 rounded-md text-xs font-medium border',
+                    viewMode === 'conversations'
+                      ? 'bg-emerald-700 text-white border-emerald-700'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  )}
+                  onClick={() => setViewMode('conversations')}
+                >
+                  Conversations
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    'px-2 py-1 rounded-md text-xs font-medium border',
+                    viewMode === 'customers'
+                      ? 'bg-emerald-700 text-white border-emerald-700'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  )}
+                  onClick={() => setViewMode('customers')}
+                >
+                  Customers
+                </button>
+                <button
+                  type="button"
+                  aria-label="Collapse conversations panel"
+                  title="Collapse"
+                  onClick={() => setLeftCollapsed(true)}
+                  className="ml-auto p-1 rounded-md text-slate-600 hover:bg-slate-200/70 focus:outline-none"
+                >
+                  <PanelLeftOpen className="h-4 w-4 rotate-180" />
+                </button>
+              </div>
+              {viewMode === 'conversations' ? (
+                <InboxConversationList
+                  listFilter={listFilter}
+                  channelFilter={channelFilter}
+                  searchQuery={searchQuery}
+                  onListFilterChange={setListFilter}
+                  onChannelFilterChange={setChannelFilter}
+                  onSearchChange={setSearchQuery}
+                  conversations={displayConversations}
+                  selectedConversationId={selectedConversationId}
+                  selectedItems={selectedItems}
+                  onSelectConversation={setSelectedConversationId}
+                  onToggleSelection={toggleSelection}
+                  onNewClick={() => setNewConversationModalOpen(true)}
+                  onDeleteClick={handleDelete}
+                  onToggleReadUnreadClick={handleToggleReadUnread}
+                  deleteDisabled={selectedItems.length === 0 && !selectedConversationId}
+                  toggleReadUnreadDisabled={
+                    toggleTargetIds.length === 0 ||
+                    markAsReadMutation.isPending ||
+                    markAsUnreadMutation.isPending
+                  }
+                  anyToggleTargetUnread={anyToggleTargetUnread}
+                  isLoading={isLoading}
+                  isError={isError}
+                  hasGmailConnection={!!gmailConnection}
+                />
+              ) : (
+                <CustomerThreadList
+                  listFilter={listFilter}
+                  channelFilter={channelFilter}
+                  searchQuery={searchQuery}
+                  onListFilterChange={setListFilter}
+                  onChannelFilterChange={setChannelFilter}
+                  onSearchChange={setSearchQuery}
+                  rows={customerRows}
+                  selectedPersonId={selectedPersonId}
+                  onSelectPerson={setSelectedPersonId}
+                  isLoading={customersLoading}
+                  isError={customersError}
+                  onToggleReadUnreadClick={handleToggleReadUnread}
+                  toggleReadUnreadDisabled={
+                    !selectedPersonId ||
+                    markAsReadMutation.isPending ||
+                    markAsUnreadMutation.isPending
+                  }
+                  selectedHasUnread={
+                    customerRows.find((row) => row.personId === selectedPersonId)?.hasUnread ?? false
+                  }
+                />
+              )}
+            </div>
+
+            {/* Left rail (desktop only). */}
+            <div
+              className={cn(
+                "flex flex-col h-full min-h-0 items-center",
+                effectiveLeftCollapsed ? "" : "hidden"
+              )}
+            >
+              <div className="shrink-0 w-full flex justify-center pt-1">
+                <button
+                  type="button"
+                  aria-label="Expand conversations panel"
+                  title="Expand"
+                  onClick={() => setLeftCollapsed(false)}
+                  className="w-10 h-10 rounded-md flex items-center justify-center text-slate-600 hover:bg-slate-200/70 focus:outline-none"
+                >
+                  <MessageSquareText className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="flex-1 min-h-0" />
+            </div>
           </div>
 
           {/* Column 2: Conversation thread + header + reply (full height; only thread scrolls; composer at bottom) */}
@@ -587,12 +702,51 @@ export const UnifiedInboxPage: React.FC = () => {
 
           {/* Column 3: Order context panel */}
           <div className="hidden lg:flex lg:flex-col min-h-0 h-full min-w-0 overflow-hidden">
-            <PersonOrdersPanel
-            personId={activePersonId}
-            selectedOrderId={selectedOrderId}
-            onSelectOrder={setSelectedOrderId}
-            onCloseOrder={() => setSelectedOrderId(null)}
-          />
+            {/* Expanded content (kept mounted; only hidden when collapsed). */}
+            <div className={cn("flex-1 min-h-0 overflow-hidden", effectiveRightCollapsed && "hidden")}>
+              <div className="relative h-full">
+                {/* Collapse control for the right panel (kept outside PersonOrdersPanel). */}
+                <button
+                  type="button"
+                  aria-label="Collapse order context panel"
+                  title="Collapse"
+                  onClick={() => setRightCollapsed(true)}
+                  className={cn(
+                    "absolute top-2 left-2 z-10 w-8 h-8 rounded-md flex items-center justify-center text-slate-600 hover:bg-slate-200/70 focus:outline-none",
+                    effectiveRightCollapsed && "hidden"
+                  )}
+                >
+                  <PanelRightClose className="h-4 w-4 opacity-50" />
+                </button>
+
+                <PersonOrdersPanel
+                  personId={activePersonId}
+                  selectedOrderId={selectedOrderId}
+                  onSelectOrder={setSelectedOrderId}
+                  onCloseOrder={() => setSelectedOrderId(null)}
+                />
+              </div>
+            </div>
+
+            {/* Right rail (desktop only, when collapsed). */}
+            <div
+              className={cn(
+                "w-full h-full flex flex-col items-center",
+                effectiveRightCollapsed ? "" : "hidden"
+              )}
+            >
+              <div className="shrink-0 w-full flex justify-center pt-1">
+                <button
+                  type="button"
+                  aria-label="Expand order context panel"
+                  title="Expand"
+                  onClick={() => setRightCollapsed(false)}
+                  className="w-10 h-10 rounded-md flex items-center justify-center text-slate-600 hover:bg-slate-200/70 focus:outline-none"
+                >
+                  <Package className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

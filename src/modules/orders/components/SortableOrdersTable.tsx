@@ -1,4 +1,19 @@
 import React, { useState, useRef, useCallback } from 'react';
+import {
+  DndContext,
+  DragEndEvent,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  horizontalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/components/ui/table";
 import { Button } from "@/shared/components/ui/button";
 import { Edit, Trash2 } from 'lucide-react';
@@ -6,6 +21,7 @@ import { useMessageCountsByOrders } from '@/modules/inbox/hooks/useMessages';
 import { orderColumnDefinitions } from './orderColumnDefinitions';
 import type { UIOrder } from '../utils/orderTransform';
 import type { ColumnState } from '@/shared/tableViewPresets/types/tableViewPresets.types';
+import { useIsMobile } from '@/shared/hooks/use-mobile';
 
 interface SortConfig {
   key: string;
@@ -31,6 +47,7 @@ export const SortableOrdersTable: React.FC<SortableOrdersTableProps> = ({
   columnState,
   onColumnStateChange,
 }) => {
+  const isMobile = useIsMobile();
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
   const [resizingColumn, setResizingColumn] = useState<string | null>(null);
   const [resizeStartX, setResizeStartX] = useState(0);
@@ -86,6 +103,128 @@ export const SortableOrdersTable: React.FC<SortableOrdersTableProps> = ({
         return aIndex - bIndex;
       });
   }, [columnState]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  );
+
+  const computeNextOrderPreservingHidden = useCallback(
+    (fullOrder: string[], visibleIds: string[], activeId: string, overId: string) => {
+      if (activeId === overId) return fullOrder;
+
+      // Normalize state for drag calculation:
+      // - Start from persisted `columnState.order` (fullOrder)
+      // - Append any visible-but-missing ids at the end in the current UI order
+      // This prevents a strict no-op when a visible column id is not present in `columnState.order`.
+      const safeFullOrder = [...fullOrder];
+      for (const id of visibleIds) {
+        if (!safeFullOrder.includes(id)) safeFullOrder.push(id);
+      }
+
+      const visibleSet = new Set(visibleIds);
+      const visibleInFullOrder = safeFullOrder.filter((id) => visibleSet.has(id));
+
+      // If the state is inconsistent (ids missing), do a safe no-op.
+      if (visibleInFullOrder.length !== visibleIds.length) return fullOrder;
+
+      const oldIndex = visibleInFullOrder.indexOf(activeId);
+      const newIndex = visibleInFullOrder.indexOf(overId);
+      if (oldIndex < 0 || newIndex < 0) return fullOrder;
+
+      const movedVisibleIds = arrayMove(visibleInFullOrder, oldIndex, newIndex);
+
+      // Rebuild full order by replacing only visible ids in their existing slots.
+      let movedIndex = 0;
+      return safeFullOrder.map((id) => {
+        if (!visibleSet.has(id)) return id;
+        const nextId = movedVisibleIds[movedIndex];
+        movedIndex += 1;
+        return nextId ?? id;
+      });
+    },
+    []
+  );
+
+  const handleHeaderDragEnd = useCallback(
+    ({ active, over }: DragEndEvent) => {
+      if (!onColumnStateChange) return;
+      if (isMobile) return;
+      if (!over) return;
+
+      const activeId = String(active.id);
+      const overId = String(over.id);
+
+      const fullOrder = columnState.order;
+      const visibleIds = visibleColumns.map((c) => c.id);
+      const nextOrder = computeNextOrderPreservingHidden(
+        fullOrder,
+        visibleIds,
+        activeId,
+        overId
+      );
+
+      // Avoid unnecessary state updates.
+      const changed =
+        nextOrder.length !== fullOrder.length ||
+        nextOrder.some((id, i) => id !== fullOrder[i]);
+      if (!changed) return;
+
+      onColumnStateChange({
+        ...columnState,
+        order: nextOrder,
+      });
+    },
+    [onColumnStateChange, isMobile, columnState, visibleColumns, computeNextOrderPreservingHidden]
+  );
+
+  const SortableHeaderCell: React.FC<{
+    column: (typeof visibleColumns)[number];
+    width: number;
+    sortDirection: 'asc' | 'desc' | null;
+  }> = ({ column, width, sortDirection }) => {
+    const {
+      attributes,
+      listeners,
+      setNodeRef,
+      transform,
+      transition,
+      isDragging,
+    } = useSortable({ id: column.id });
+
+    const style: React.CSSProperties = {
+      transform: CSS.Transform.toString(transform),
+      transition,
+      opacity: isDragging ? 0.85 : 1,
+    };
+
+    return (
+      <TableHead
+        className="relative"
+        style={{ width: `${width}px`, minWidth: `${width}px` }}
+      >
+        <div
+          ref={setNodeRef}
+          style={style}
+          {...attributes}
+          {...listeners}
+          className="h-full pr-3 flex items-center"
+        >
+          {column.renderHeader({
+            onSort: column.sortable ? () => handleSort(column.id) : undefined,
+            sortDirection,
+          })}
+        </div>
+        {onColumnStateChange && (
+          <div
+            ref={resizeRef}
+            className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-blue-500 bg-transparent"
+            onMouseDown={(e) => handleResizeStart(column.id, e)}
+            style={{ zIndex: 10 }}
+          />
+        )}
+      </TableHead>
+    );
+  };
 
   const sortedOrders = React.useMemo(() => {
     if (!sortConfig) return orders;
@@ -216,31 +355,56 @@ export const SortableOrdersTable: React.FC<SortableOrdersTableProps> = ({
       <Table>
         <TableHeader>
           <TableRow>
-            {visibleColumns.map((column) => {
-              const width = columnState.widths[column.id] || column.defaultWidth;
-              const sortDirection = getSortDirection(column.id);
-              
-              return (
-                <TableHead 
-                  key={column.id} 
-                  className="relative"
-                  style={{ width: `${width}px`, minWidth: `${width}px` }}
+            {isMobile ? (
+              visibleColumns.map((column) => {
+                const width = columnState.widths[column.id] || column.defaultWidth;
+                const sortDirection = getSortDirection(column.id);
+                return (
+                  <TableHead
+                    key={column.id}
+                    className="relative"
+                    style={{ width: `${width}px`, minWidth: `${width}px` }}
+                  >
+                    {column.renderHeader({
+                      onSort: column.sortable ? () => handleSort(column.id) : undefined,
+                      sortDirection,
+                    })}
+                    {onColumnStateChange && (
+                      <div
+                        ref={resizeRef}
+                        className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-blue-500 bg-transparent"
+                        onMouseDown={(e) => handleResizeStart(column.id, e)}
+                        style={{ zIndex: 10 }}
+                      />
+                    )}
+                  </TableHead>
+                );
+              })
+            ) : (
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleHeaderDragEnd}
+              >
+                <SortableContext
+                  items={visibleColumns.map((c) => c.id)}
+                  strategy={horizontalListSortingStrategy}
                 >
-                  {column.renderHeader({
-                    onSort: column.sortable ? () => handleSort(column.id) : undefined,
-                    sortDirection,
+                  {visibleColumns.map((column) => {
+                    const width = columnState.widths[column.id] || column.defaultWidth;
+                    const sortDirection = getSortDirection(column.id);
+                    return (
+                      <SortableHeaderCell
+                        key={column.id}
+                        column={column}
+                        width={width}
+                        sortDirection={sortDirection}
+                      />
+                    );
                   })}
-                  {onColumnStateChange && (
-                    <div
-                      ref={resizeRef}
-                      className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-blue-500 bg-transparent"
-                      onMouseDown={(e) => handleResizeStart(column.id, e)}
-                      style={{ zIndex: 10 }}
-                    />
-                  )}
-                </TableHead>
-              );
-            })}
+                </SortableContext>
+              </DndContext>
+            )}
             <TableHead>Actions</TableHead>
           </TableRow>
         </TableHeader>
