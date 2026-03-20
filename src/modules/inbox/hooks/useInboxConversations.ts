@@ -16,15 +16,23 @@ import { syncGmail } from '../api/inboxGmail.api';
 import type { InboxConversation, ConversationFilters } from '../types/inbox.types';
 
 export const inboxKeys = {
+  all: ['inbox'] as const,
   conversations: {
     all: ['inbox', 'conversations'] as const,
     lists: (filters?: ConversationFilters) => ['inbox', 'conversations', 'list', filters] as const,
     detail: (id: string) => ['inbox', 'conversations', id] as const,
   },
+  customers: {
+    all: ['inbox', 'customers'] as const,
+    lists: (filters?: ConversationFilters) => ['inbox', 'customers', 'list', filters] as const,
+  },
   messages: {
+    all: ['inbox', 'messages'] as const,
     byConversation: (id: string) => ['inbox', 'messages', 'conversation', id] as const,
+    customerMessages: (personId: string, conversationIds: string[]) =>
+      ['inbox', 'customerMessages', personId, conversationIds] as const,
     personTimeline: (personId: string, conversationIds: string[]) =>
-      ['inbox', 'messages', 'personTimeline', personId, conversationIds] as const,
+      ['inbox', 'customerMessages', personId, conversationIds] as const,
   },
   channels: {
     all: ['inbox', 'channels'] as const,
@@ -99,7 +107,7 @@ export function useCreateConversation() {
   return useMutation({
     mutationFn: (payload: CreateConversationPayload) => createConversation(payload),
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+      queryClient.invalidateQueries({ queryKey: inboxKeys.all });
       queryClient.setQueryData(inboxKeys.conversations.detail(data.id), data);
     },
   });
@@ -132,7 +140,7 @@ export function useMarkAsRead() {
     },
     onSettled: () => {
       // Invalidate all conversation list queries to resync with server
-      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+      queryClient.invalidateQueries({ queryKey: inboxKeys.all });
     },
   });
 }
@@ -164,7 +172,7 @@ export function useMarkAsUnread() {
     },
     onSettled: () => {
       // Invalidate all conversation list queries to resync with server
-      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+      queryClient.invalidateQueries({ queryKey: inboxKeys.all });
     },
   });
 }
@@ -176,7 +184,7 @@ export function useArchiveConversations() {
     mutationFn: (ids: string[]) => archiveConversations(ids),
     onSuccess: () => {
       // Invalidate all conversation list queries
-      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+      queryClient.invalidateQueries({ queryKey: inboxKeys.all });
     },
   });
 }
@@ -188,7 +196,7 @@ export function useDeleteConversations() {
     mutationFn: (ids: string[]) => deleteConversations(ids),
     onSuccess: (_data, ids) => {
       // Invalidate lists and remove any now-stale detail/message caches.
-      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+      queryClient.invalidateQueries({ queryKey: inboxKeys.all });
       ids.forEach((id) => {
         queryClient.removeQueries({ queryKey: inboxKeys.conversations.detail(id) });
         queryClient.removeQueries({ queryKey: inboxKeys.messages.byConversation(id) });
@@ -204,9 +212,9 @@ export function useSyncGmail() {
     mutationFn: (options?: { since?: string; maxMessages?: number }) => syncGmail(options),
     onSuccess: () => {
       // Invalidate all conversation list queries to show new emails
-      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+      queryClient.invalidateQueries({ queryKey: inboxKeys.all });
       // Invalidate message queries so the open conversation thread refetches
-      queryClient.invalidateQueries({ queryKey: ['inbox', 'messages'] });
+      queryClient.invalidateQueries({ queryKey: inboxKeys.messages.all });
     },
   });
 }
@@ -218,7 +226,7 @@ export function useLinkConversation() {
     mutationFn: ({ conversationId, personId }: { conversationId: string; personId: string }) =>
       linkConversation(conversationId, personId),
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+      queryClient.invalidateQueries({ queryKey: inboxKeys.all });
       queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.detail(variables.conversationId) });
     },
   });
@@ -230,7 +238,7 @@ export function useUnlinkConversation() {
   return useMutation({
     mutationFn: (conversationId: string) => unlinkConversation(conversationId),
     onSuccess: (_, conversationId) => {
-      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+      queryClient.invalidateQueries({ queryKey: inboxKeys.all });
       queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.detail(conversationId) });
     },
   });

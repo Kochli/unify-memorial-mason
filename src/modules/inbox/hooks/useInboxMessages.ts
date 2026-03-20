@@ -6,7 +6,7 @@ import { inboxKeys } from './useInboxConversations';
 import { sendTwilioMessage } from '../api/inboxTwilio.api';
 import { sendGmailReply, sendGmailFirstMessage } from '../api/inboxGmail.api';
 import { sendSmsReply } from '../api/inboxSms.api';
-import type { InboxMessage } from '../types/inbox.types';
+import type { ConversationIdByChannel, InboxChannel, InboxConversation, InboxMessage } from '../types/inbox.types';
 
 /** Thread messages refresh via Realtime invalidation (UnifiedInboxPage invalidates byConversation on INSERT/UPDATE); no interval polling. */
 export function useMessagesByConversation(conversationId: string | null) {
@@ -41,15 +41,80 @@ export function usePersonUnifiedTimeline(personId: string | null): {
     isLoading: messagesLoading,
     isError: messagesError,
   } = useQuery({
-    queryKey: inboxKeys.messages.personTimeline(personId ?? '', conversationIds),
+    queryKey: inboxKeys.messages.customerMessages(personId ?? '', conversationIds),
     queryFn: () => fetchMessagesByConversationIds(conversationIds),
     enabled: !!personId && conversationIds.length > 0,
   });
+  const sortedMessages = useMemo(() => {
+    if (!messages?.length) return [];
+    const byId = new Map<string, InboxMessage>();
+    messages.forEach((message) => {
+      byId.set(message.id, message);
+    });
+    return Array.from(byId.values()).sort((a, b) => {
+      const aSent = new Date(a.sent_at ?? a.created_at).getTime();
+      const bSent = new Date(b.sent_at ?? b.created_at).getTime();
+      if (aSent !== bSent) return aSent - bSent;
+      const aCreated = new Date(a.created_at).getTime();
+      const bCreated = new Date(b.created_at).getTime();
+      if (aCreated !== bCreated) return aCreated - bCreated;
+      return a.id.localeCompare(b.id);
+    });
+  }, [messages]);
   return {
-    messages,
+    messages: sortedMessages,
     isLoading: conversationsLoading || (!!personId && conversationIds.length > 0 && messagesLoading),
     isError: conversationsError || messagesError,
   };
+}
+
+/** Semantic alias for customer-centric mode. */
+export function useCustomerMessages(personId: string | null) {
+  return usePersonUnifiedTimeline(personId);
+}
+
+const CHANNEL_PRIORITY: InboxChannel[] = ['email', 'sms', 'whatsapp'];
+
+/**
+ * Resolve latest conversation id per channel.
+ * Prefers channels that have the most recent messages; falls back to conversation recency.
+ */
+export function buildConversationIdByChannel(
+  conversations: InboxConversation[],
+  messages: InboxMessage[]
+): ConversationIdByChannel {
+  const byChannel: ConversationIdByChannel = { email: null, sms: null, whatsapp: null };
+  const latestMessageTsByConversation = new Map<string, number>();
+  messages.forEach((message) => {
+    const ts = new Date(message.sent_at ?? message.created_at).getTime();
+    const prev = latestMessageTsByConversation.get(message.conversation_id) ?? Number.NEGATIVE_INFINITY;
+    if (ts > prev) latestMessageTsByConversation.set(message.conversation_id, ts);
+  });
+
+  CHANNEL_PRIORITY.forEach((channel) => {
+    const candidates = conversations.filter((conversation) => conversation.channel === channel);
+    if (candidates.length === 0) return;
+    const fromMessages = candidates
+      .map((conversation) => ({
+        id: conversation.id,
+        ts: latestMessageTsByConversation.get(conversation.id) ?? Number.NEGATIVE_INFINITY,
+      }))
+      .sort((a, b) => b.ts - a.ts);
+    if (fromMessages.length > 0 && Number.isFinite(fromMessages[0].ts)) {
+      byChannel[channel] = fromMessages[0].id;
+      return;
+    }
+    const fromConversation = candidates
+      .slice()
+      .sort((a, b) => {
+        const aTs = new Date(a.last_message_at ?? a.created_at).getTime();
+        const bTs = new Date(b.last_message_at ?? b.created_at).getTime();
+        return bTs - aTs;
+      })[0];
+    byChannel[channel] = fromConversation?.id ?? null;
+  });
+
+  return byChannel;
 }
 
 export function useSendReply() {
@@ -103,8 +168,8 @@ export function useSendReply() {
     onSuccess: (data, variables) => {
       // Invalidate message thread
       queryClient.invalidateQueries({ queryKey: inboxKeys.messages.byConversation(variables.conversationId) });
-      // Invalidate conversation list (to update last_message_*)
-      queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+      // Invalidate all inbox query families so both modes update immediately.
+      queryClient.invalidateQueries({ queryKey: inboxKeys.all });
       // Invalidate conversation detail
       queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.detail(variables.conversationId) });
     },

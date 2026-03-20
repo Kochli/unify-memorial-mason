@@ -80,3 +80,19 @@ export interface ConversationFilters {
   person_id?: string | null;
   unlinked_only?: boolean;
 }
+
+export type InboxChannel = 'email' | 'sms' | 'whatsapp';
+
+export type ConversationIdByChannel = Record<InboxChannel, string | null>;
+
+export interface CustomerThreadRow {
+  personId: string;
+  displayName: string;
+  latestMessageAt: string | null;
+  latestPreview: string | null;
+  unreadCount: number;
+  hasUnread: boolean;
+  channels: InboxChannel[];
+  latestConversationIdByChannel: ConversationIdByChannel;
+  conversationIds: string[];
+}

@@ -7,6 +7,7 @@ import { useSendReply } from '@/modules/inbox/hooks/useInboxMessages';
 import { useSuggestedReply } from '@/modules/inbox/hooks/useSuggestedReply';
 import type { InboxMessage } from '@/modules/inbox/types/inbox.types';
 import { formatDateTimeDMY } from '@/shared/lib/formatters';
+import { ChannelSelector } from './ChannelSelector';
 
 /** Font stack for message body so Georgian and other non-Latin scripts render correctly. */
 const MESSAGE_BODY_FONT_STACK =
@@ -71,6 +72,10 @@ export interface ConversationThreadProps {
   onReplyChannelChange?: (channel: 'email' | 'sms' | 'whatsapp') => void;
   /** Conversation subject (for first email in new thread). */
   conversationSubject?: string | null;
+  /** Enable near-bottom auto-scroll policy (customers mode). */
+  conditionalAutoScroll?: boolean;
+  /** Changing this key forces scroll-to-bottom once (e.g., switching customers). */
+  autoScrollResetKey?: string | null;
 }
 
 function mostRecentInboundChannel(messages: InboxMessage[]): 'email' | 'sms' | 'whatsapp' | null {
@@ -166,8 +171,11 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
   participantName = null,
   onReplyChannelChange,
   conversationSubject = null,
+  conditionalAutoScroll = false,
+  autoScrollResetKey = null,
 }) => {
   const isUnifiedMode = !!conversationIdByChannel;
+  const allChannels = useMemo(() => ['email', 'sms', 'whatsapp'] as const, []);
   const effectiveDefault = useMemo(() => {
     if (!isUnifiedMode) return null;
     return replyTo?.channel ?? defaultChannel ?? mostRecentInboundChannel(messages) ?? 'email';
@@ -181,6 +189,10 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
   const sendReplyMutation = useSendReply();
   const composerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const isNearBottomRef = useRef(true);
+  const lastLengthRef = useRef(0);
+  const lastResetKeyRef = useRef<string | null>(null);
+  const rafIdRef = useRef<number | null>(null);
 
   // When replyTo is set, lock channel to replyTo.channel; when cleared, restore previous
   const channelLocked = !!replyTo;
@@ -227,6 +239,19 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
     }
     return ['email', 'sms', 'whatsapp'] as const;
   }, [conversationIdByChannel]);
+  const disabledChannels = useMemo(
+    () => (allChannels.filter((channel) => !availableChannels.includes(channel))),
+    [allChannels, availableChannels]
+  );
+
+  useEffect(() => {
+    if (channelLocked) return;
+    if (!isUnifiedMode) return;
+    if (availableChannels.length === 0) return;
+    if (!availableChannels.includes(selectedChannel)) {
+      setSelectedChannel(availableChannels[0]);
+    }
+  }, [availableChannels, selectedChannel, channelLocked, isUnifiedMode]);
 
   // Active Reply via pill: always reflect the currently open conversation's channel (no stale local state).
   const pillActiveChannel =
@@ -249,8 +274,49 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
 
   useEffect(() => {
     const el = scrollContainerRef?.current;
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'auto' });
-  }, [messages, scrollContainerRef]);
+    if (!el) return;
+    if (!conditionalAutoScroll) {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'auto' });
+      return;
+    }
+
+    const thresholdPx = 120;
+    const onScroll = () => {
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      isNearBottomRef.current = distance <= thresholdPx;
+    };
+    onScroll();
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+    };
+  }, [scrollContainerRef, conditionalAutoScroll]);
+
+  useEffect(() => {
+    const el = scrollContainerRef?.current;
+    if (!el) return;
+    if (!conditionalAutoScroll) {
+      lastLengthRef.current = messages.length;
+      return;
+    }
+    const resetChanged = autoScrollResetKey !== lastResetKeyRef.current;
+    const lengthChanged = messages.length !== lastLengthRef.current;
+    const shouldScroll = resetChanged || (lengthChanged && isNearBottomRef.current);
+    lastResetKeyRef.current = autoScrollResetKey;
+    lastLengthRef.current = messages.length;
+    if (!shouldScroll) return;
+    if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
+    rafIdRef.current = requestAnimationFrame(() => {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'auto' });
+      rafIdRef.current = null;
+    });
+  }, [messages.length, scrollContainerRef, conditionalAutoScroll, autoScrollResetKey]);
+
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
+    };
+  }, []);
 
   const handleSendReply = () => {
     if (!activeConversationId || !replyText.trim() || !activeChannel) return;
@@ -389,7 +455,16 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
             </div>
           )}
           {/* Reply via pills: unified mode uses internal channel switching; inbox uses parent callback */}
-          {availableChannels.length > 0 && (
+          {isUnifiedMode ? (
+            <ChannelSelector
+              value={allChannels.includes(pillActiveChannel) ? pillActiveChannel : allChannels[0]}
+              onChange={(ch) => {
+                if (isUnifiedMode) setSelectedChannel(ch);
+                onReplyChannelChange?.(ch);
+              }}
+              disabledChannels={disabledChannels}
+            />
+          ) : availableChannels.length > 0 ? (
             <div className="mb-3 flex items-center gap-2">
               <span className="text-xs text-slate-500">Reply via</span>
               <ReplyChannelPills
@@ -397,15 +472,12 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
                 value={availableChannels.includes(pillActiveChannel) ? pillActiveChannel : availableChannels[0]}
                 onChange={(v) => {
                   const ch = v as 'email' | 'sms' | 'whatsapp';
-                  if (isUnifiedMode) {
-                    setSelectedChannel(ch);
-                  }
                   onReplyChannelChange?.(ch);
                 }}
                 disabled={false}
               />
             </div>
-          )}
+          ) : null}
           <textarea
             ref={textareaRef}
             placeholder="Type your reply..."
@@ -428,6 +500,11 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
             className="w-full mb-3 px-3 py-2.5 text-sm rounded-lg border border-slate-200 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400 resize-y min-h-[72px]"
           />
           {errorMessage && <p className="mb-2 text-xs text-red-600">{errorMessage}</p>}
+          {isUnifiedMode && !activeConversationId && (
+            <p className="mb-2 text-xs text-slate-500">
+              This customer does not have an active conversation for the selected channel.
+            </p>
+          )}
           <div className="flex items-center justify-between gap-2">
             <div className="flex-1 min-w-0">
               <SuggestedReplyChip

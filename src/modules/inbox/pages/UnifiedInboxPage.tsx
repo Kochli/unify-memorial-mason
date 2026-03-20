@@ -5,6 +5,8 @@ import { useToast } from '@/shared/hooks/use-toast';
 import { supabase } from '@/shared/lib/supabase';
 import { ConversationView } from "../components/ConversationView";
 import { InboxConversationList, type ListFilter, type ChannelFilter } from "../components/InboxConversationList";
+import { CustomerThreadList } from "../components/CustomerThreadList";
+import { CustomerConversationView } from "../components/CustomerConversationView";
 import { PersonOrdersPanel } from "../components/PersonOrdersPanel";
 import {
   inboxKeys,
@@ -21,27 +23,32 @@ import { useGmailConnection } from "@/modules/inbox/hooks/useGmailConnection";
 import { gmailConnectionKeys } from "@/modules/inbox/hooks/useGmailConnection";
 import type { ConversationFilters } from "@/modules/inbox/types/inbox.types";
 import { cn } from "@/shared/lib/utils";
+import { useCustomerThreads } from '../hooks/useCustomerThreads';
 
 const REALTIME_DEBOUNCE_MS = 200;
 const GMAIL_POLL_INTERVAL_MS = 10_000;
+const INBOX_FALLBACK_REFRESH_MS = 20_000;
 
 export const UnifiedInboxPage: React.FC = () => {
+  const [viewMode, setViewMode] = useState<'conversations' | 'customers'>('conversations');
   const [listFilter, setListFilter] = useState<ListFilter>('all');
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>('all');
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
+  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [newConversationModalOpen, setNewConversationModalOpen] = useState(false);
   const autoReadOnceRef = useRef<Set<string>>(new Set());
+  const autoReadCustomersRef = useRef<Set<string>>(new Set());
   const realtimePendingIdsRef = useRef<Set<string>>(new Set());
   const realtimeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [realtimeInvalidateIds, setRealtimeInvalidateIds] = useState<string[]>([]);
-  const setRealtimeInvalidateIdsRef = useRef(setRealtimeInvalidateIds);
-  setRealtimeInvalidateIdsRef.current = setRealtimeInvalidateIds;
+  const invalidateInFlightRef = useRef(false);
 
   const { data: selectedConversation } = useConversation(selectedConversationId);
-  const activePersonId = (selectedConversation?.person_id ?? null) as string | null;
+  const activePersonId = (
+    viewMode === 'customers' ? selectedPersonId : selectedConversation?.person_id ?? null
+  ) as string | null;
 
   useEffect(() => {
     setSelectedOrderId(null);
@@ -69,6 +76,15 @@ export const UnifiedInboxPage: React.FC = () => {
   // All-channel conversations for the same filters: used by Reply via pills so they
   // can always search across every channel regardless of the left-panel filter.
   const { data: allConversations } = useConversationsList(baseFilters);
+  const {
+    rows: customerRows,
+    isLoading: customersLoading,
+    isError: customersError,
+  } = useCustomerThreads({
+    baseFilters,
+    channelFilter,
+    listFilter,
+  });
   const createConversationMutation = useCreateConversation();
   const markAsReadMutation = useMarkAsRead();
   const markAsUnreadMutation = useMarkAsUnread();
@@ -77,8 +93,21 @@ export const UnifiedInboxPage: React.FC = () => {
   const { data: gmailConnection } = useGmailConnection();
   const { toast } = useToast();
   const gmailPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const fallbackPollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const syncGmailMutationRef = useRef(syncGmailMutation);
   syncGmailMutationRef.current = syncGmailMutation;
+  const invalidateInboxData = useMemo(
+    () => async () => {
+      if (invalidateInFlightRef.current) return;
+      invalidateInFlightRef.current = true;
+      try {
+        await queryClient.invalidateQueries({ queryKey: inboxKeys.all });
+      } finally {
+        invalidateInFlightRef.current = false;
+      }
+    },
+    [queryClient]
+  );
 
   // After Gmail OAuth callback: show toast and clear ?gmail=connected from URL
   useEffect(() => {
@@ -122,15 +151,56 @@ export const UnifiedInboxPage: React.FC = () => {
 
   // Auto-select first (most recent) conversation on load or when selection is no longer in the visible list
   useEffect(() => {
+    if (viewMode !== 'conversations') return;
     if (isLoading || isError) return;
     if (displayConversations.length === 0) {
       setSelectedConversationId(null);
       return;
     }
-    if (!selectedConversationId) {
+    if (!selectedConversationId || !displayConversations.some((conversation) => conversation.id === selectedConversationId)) {
       setSelectedConversationId(displayConversations[0].id);
     }
-  }, [displayConversations, isLoading, isError, selectedConversationId]);
+  }, [displayConversations, isLoading, isError, selectedConversationId, viewMode]);
+
+  useEffect(() => {
+    if (viewMode !== 'customers') return;
+    if (customersLoading || customersError) return;
+    if (customerRows.length === 0) {
+      setSelectedPersonId(null);
+      return;
+    }
+    if (!selectedPersonId) {
+      setSelectedPersonId(customerRows[0].personId);
+      return;
+    }
+    if (!customerRows.some((row) => row.personId === selectedPersonId)) {
+      setSelectedPersonId(customerRows[0].personId);
+    }
+  }, [viewMode, customerRows, selectedPersonId, customersLoading, customersError]);
+
+  // Customers mode: auto-mark all conversations for selected person as read on open.
+  useEffect(() => {
+    if (viewMode !== 'customers') return;
+    if (!selectedPersonId) return;
+    if (markAsReadMutation.isPending) return;
+    const row = customerRows.find((item) => item.personId === selectedPersonId);
+    if (!row || !row.hasUnread || row.conversationIds.length === 0) return;
+    if (autoReadCustomersRef.current.has(selectedPersonId)) return;
+
+    autoReadCustomersRef.current.add(selectedPersonId);
+    markAsReadMutation.mutate(row.conversationIds, {
+      onError: () => {
+        autoReadCustomersRef.current.delete(selectedPersonId);
+      },
+    });
+  }, [viewMode, selectedPersonId, customerRows, markAsReadMutation]);
+
+  // Allow re-auto-marking same customer when unread appears again later.
+  useEffect(() => {
+    customerRows.forEach((row) => {
+      if (row.hasUnread) autoReadCustomersRef.current.delete(row.personId);
+    });
+  }, [customerRows]);
 
   const toggleTargetIds = useMemo(() => {
     if (selectedItems.length > 0) {
@@ -140,12 +210,17 @@ export const UnifiedInboxPage: React.FC = () => {
   }, [selectedItems, selectedConversationId]);
 
   const anyToggleTargetUnread = useMemo(() => {
+    if (viewMode === 'customers') {
+      if (!selectedPersonId) return false;
+      const row = customerRows.find((item) => item.personId === selectedPersonId);
+      return row?.hasUnread ?? false;
+    }
     if (!toggleTargetIds.length) return false;
     return toggleTargetIds.some((id) => {
       const conversation = conversationsById.get(id);
       return conversation ? conversation.unread_count > 0 : false;
     });
-  }, [toggleTargetIds, conversationsById]);
+  }, [toggleTargetIds, conversationsById, viewMode, selectedPersonId, customerRows]);
 
   const handleReplyChannelChange = (target: 'email' | 'sms' | 'whatsapp') => {
     if (!selectedConversationId || !allConversations) return;
@@ -196,18 +271,7 @@ export const UnifiedInboxPage: React.FC = () => {
     }
   }, [selectedConversationId, conversationsById, markAsReadMutation, toast]);
 
-  // Invalidate conversation/message queries from React lifecycle so All-tab observer refetches (same as Gmail onSuccess).
-  useEffect(() => {
-    if (realtimeInvalidateIds.length === 0) return;
-    queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
-    realtimeInvalidateIds.forEach((conversationId) => {
-      queryClient.invalidateQueries({ queryKey: inboxKeys.messages.byConversation(conversationId) });
-    });
-    setRealtimeInvalidateIds([]);
-  }, [realtimeInvalidateIds, queryClient]);
-
-  // Realtime: subscribe to inbox_messages INSERT and inbox_conversations UPDATE; debounce then request invalidation via state.
-  // Invalidation runs in the effect above (React lifecycle) so it triggers All-tab refetch like Gmail sync onSuccess.
+  // Realtime: subscribe to inbox_messages INSERT and inbox_conversations UPDATE; debounce then fan out inbox invalidation.
   useEffect(() => {
     const channel = supabase.channel('inbox-realtime');
     const flush = () => {
@@ -215,7 +279,7 @@ export const UnifiedInboxPage: React.FC = () => {
       const ids = Array.from(realtimePendingIdsRef.current);
       realtimePendingIdsRef.current.clear();
       if (ids.length === 0) return;
-      setRealtimeInvalidateIdsRef.current(ids);
+      void invalidateInboxData();
     };
     const scheduleFlush = () => {
       if (realtimeDebounceRef.current) return;
@@ -262,7 +326,7 @@ export const UnifiedInboxPage: React.FC = () => {
       realtimePendingIdsRef.current.clear();
       void supabase.removeChannel(channel);
     };
-  }, [queryClient]);
+  }, [invalidateInboxData]);
 
   // Gmail auto-sync: poll every 10s when user has an active Gmail connection.
   useEffect(() => {
@@ -281,8 +345,26 @@ export const UnifiedInboxPage: React.FC = () => {
     };
   }, [gmailConnection]);
 
+  // Fallback refresh backbone: ensures eventual consistency if realtime misses events.
+  useEffect(() => {
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      void invalidateInboxData();
+    };
+    fallbackPollIntervalRef.current = setInterval(tick, INBOX_FALLBACK_REFRESH_MS);
+    return () => {
+      if (fallbackPollIntervalRef.current) {
+        clearInterval(fallbackPollIntervalRef.current);
+        fallbackPollIntervalRef.current = null;
+      }
+    };
+  }, [invalidateInboxData]);
+
   const handleToggleReadUnread = () => {
-    const ids = toggleTargetIds;
+    const ids =
+      viewMode === 'customers'
+        ? (customerRows.find((item) => item.personId === selectedPersonId)?.conversationIds ?? [])
+        : toggleTargetIds;
     if (ids.length === 0) return;
 
     const isMarkingRead = anyToggleTargetUnread;
@@ -302,7 +384,7 @@ export const UnifiedInboxPage: React.FC = () => {
       markAsUnreadMutation.mutate(ids, { onError });
     }
 
-    if (selectedItems.length > 0) {
+    if (viewMode === 'conversations' && selectedItems.length > 0) {
       setSelectedItems([]);
     }
   };
@@ -412,40 +494,95 @@ export const UnifiedInboxPage: React.FC = () => {
         >
           {/* Column 1: Conversation list with filters and channel pills */}
           <div className="min-h-0 h-full flex flex-col overflow-hidden border-r border-slate-200 bg-slate-100/60 p-2">
-            <InboxConversationList
-            listFilter={listFilter}
-            channelFilter={channelFilter}
-            searchQuery={searchQuery}
-            onListFilterChange={setListFilter}
-            onChannelFilterChange={setChannelFilter}
-            onSearchChange={setSearchQuery}
-            conversations={displayConversations}
-            selectedConversationId={selectedConversationId}
-            selectedItems={selectedItems}
-            onSelectConversation={setSelectedConversationId}
-            onToggleSelection={toggleSelection}
-            onNewClick={() => setNewConversationModalOpen(true)}
-            onDeleteClick={handleDelete}
-            onToggleReadUnreadClick={handleToggleReadUnread}
-            deleteDisabled={selectedItems.length === 0 && !selectedConversationId}
-            toggleReadUnreadDisabled={
-              toggleTargetIds.length === 0 ||
-              markAsReadMutation.isPending ||
-              markAsUnreadMutation.isPending
-            }
-            anyToggleTargetUnread={anyToggleTargetUnread}
-            isLoading={isLoading}
-            isError={isError}
-            hasGmailConnection={!!gmailConnection}
-          />
+            <div className="shrink-0 pb-2 flex items-center gap-1.5">
+              <button
+                type="button"
+                className={cn(
+                  'px-2 py-1 rounded-md text-xs font-medium border',
+                  viewMode === 'conversations'
+                    ? 'bg-emerald-700 text-white border-emerald-700'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                )}
+                onClick={() => setViewMode('conversations')}
+              >
+                Conversations
+              </button>
+              <button
+                type="button"
+                className={cn(
+                  'px-2 py-1 rounded-md text-xs font-medium border',
+                  viewMode === 'customers'
+                    ? 'bg-emerald-700 text-white border-emerald-700'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                )}
+                onClick={() => setViewMode('customers')}
+              >
+                Customers
+              </button>
+            </div>
+            {viewMode === 'conversations' ? (
+              <InboxConversationList
+                listFilter={listFilter}
+                channelFilter={channelFilter}
+                searchQuery={searchQuery}
+                onListFilterChange={setListFilter}
+                onChannelFilterChange={setChannelFilter}
+                onSearchChange={setSearchQuery}
+                conversations={displayConversations}
+                selectedConversationId={selectedConversationId}
+                selectedItems={selectedItems}
+                onSelectConversation={setSelectedConversationId}
+                onToggleSelection={toggleSelection}
+                onNewClick={() => setNewConversationModalOpen(true)}
+                onDeleteClick={handleDelete}
+                onToggleReadUnreadClick={handleToggleReadUnread}
+                deleteDisabled={selectedItems.length === 0 && !selectedConversationId}
+                toggleReadUnreadDisabled={
+                  toggleTargetIds.length === 0 ||
+                  markAsReadMutation.isPending ||
+                  markAsUnreadMutation.isPending
+                }
+                anyToggleTargetUnread={anyToggleTargetUnread}
+                isLoading={isLoading}
+                isError={isError}
+                hasGmailConnection={!!gmailConnection}
+              />
+            ) : (
+              <CustomerThreadList
+                listFilter={listFilter}
+                channelFilter={channelFilter}
+                searchQuery={searchQuery}
+                onListFilterChange={setListFilter}
+                onChannelFilterChange={setChannelFilter}
+                onSearchChange={setSearchQuery}
+                rows={customerRows}
+                selectedPersonId={selectedPersonId}
+                onSelectPerson={setSelectedPersonId}
+                isLoading={customersLoading}
+                isError={customersError}
+                onToggleReadUnreadClick={handleToggleReadUnread}
+                toggleReadUnreadDisabled={
+                  !selectedPersonId ||
+                  markAsReadMutation.isPending ||
+                  markAsUnreadMutation.isPending
+                }
+                selectedHasUnread={
+                  customerRows.find((row) => row.personId === selectedPersonId)?.hasUnread ?? false
+                }
+              />
+            )}
           </div>
 
           {/* Column 2: Conversation thread + header + reply (full height; only thread scrolls; composer at bottom) */}
           <div className="flex flex-col min-h-0 h-full min-w-0 overflow-hidden bg-white">
-            <ConversationView
-              conversationId={selectedConversationId}
-              onReplyChannelChange={handleReplyChannelChange}
-            />
+            {viewMode === 'conversations' ? (
+              <ConversationView
+                conversationId={selectedConversationId}
+                onReplyChannelChange={handleReplyChannelChange}
+              />
+            ) : (
+              <CustomerConversationView personId={selectedPersonId} />
+            )}
           </div>
 
           {/* Column 3: Order context panel */}
