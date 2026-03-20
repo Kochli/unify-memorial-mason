@@ -1,10 +1,20 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { useRouteError, isRouteErrorResponse, Link } from "react-router-dom";
+import * as Sentry from "@sentry/react";
 import { Button } from "@/shared/components/ui/button";
 import { AlertCircle } from "lucide-react";
 
 export function RouteErrorFallback() {
   const error = useRouteError();
+  const capturedRef = useRef(false);
+  useEffect(() => {
+    if (capturedRef.current) return;
+    capturedRef.current = true;
+    if (import.meta.env.PROD) {
+      Sentry.captureException(error);
+    }
+  }, [error]);
+
   const isRouteError = isRouteErrorResponse(error);
   const status = isRouteError ? error.status : null;
   const message =
