@@ -2,7 +2,9 @@ import React from 'react';
 import { Mail, MessageCircle, Phone, Search, Eye, EyeOff, Users } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { formatConversationTimestamp } from '@/modules/inbox/utils/conversationUtils';
-import type { CustomerThreadRow } from '@/modules/inbox/types/inbox.types';
+import type { CustomerThreadRow, CustomersSelection } from '@/modules/inbox/types/inbox.types';
+import { customerThreadRowStableKey, customersSelectionsEqual, customersSelectionFromRow } from '@/modules/inbox/types/inbox.types';
+import { InboxStatusBadge } from '@/modules/inbox/components/InboxStatusBadge';
 
 export type CustomerListFilter = 'all' | 'unread' | 'urgent' | 'unlinked';
 export type CustomerChannelFilter = 'all' | 'email' | 'sms' | 'whatsapp';
@@ -32,6 +34,16 @@ function ChannelIndicator({ channel }: { channel: 'email' | 'sms' | 'whatsapp' }
   );
 }
 
+function rowTitle(row: CustomerThreadRow): string {
+  return row.kind === 'linked' ? row.displayName : row.displayTitle;
+}
+
+function rowInitials(row: CustomerThreadRow): string {
+  const t = rowTitle(row).trim();
+  if (t.length >= 2) return t.slice(0, 2).toUpperCase();
+  return t ? t.toUpperCase() : '?';
+}
+
 interface CustomerThreadListProps {
   listFilter: CustomerListFilter;
   channelFilter: CustomerChannelFilter;
@@ -40,8 +52,8 @@ interface CustomerThreadListProps {
   onChannelFilterChange: (value: CustomerChannelFilter) => void;
   onSearchChange: (value: string) => void;
   rows: CustomerThreadRow[];
-  selectedPersonId: string | null;
-  onSelectPerson: (personId: string) => void;
+  customersSelection: CustomersSelection | null;
+  onSelectCustomersRow: (row: CustomerThreadRow) => void;
   isLoading: boolean;
   isError: boolean;
   onToggleReadUnreadClick: () => void;
@@ -57,8 +69,8 @@ export const CustomerThreadList: React.FC<CustomerThreadListProps> = ({
   onChannelFilterChange,
   onSearchChange,
   rows,
-  selectedPersonId,
-  onSelectPerson,
+  customersSelection,
+  onSelectCustomersRow,
   isLoading,
   isError,
   onToggleReadUnreadClick,
@@ -147,52 +159,58 @@ export const CustomerThreadList: React.FC<CustomerThreadListProps> = ({
         ) : rows.length === 0 ? (
           <div className="p-6 text-center text-slate-500">
             <Users className="h-9 w-9 mx-auto mb-2 text-slate-300" />
-            <p className="text-xs">No linked customer threads found</p>
+            <p className="text-xs">No linked customers or unlinked threads found</p>
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {rows.map((row) => (
-              <button
-                key={row.personId}
-                type="button"
-                onClick={() => onSelectPerson(row.personId)}
-                className={cn(
-                  'w-full text-left py-2 px-2 rounded-lg transition-colors flex items-start gap-2',
-                  selectedPersonId === row.personId ? 'bg-emerald-50/90' : 'bg-white hover:bg-slate-50/80'
-                )}
-              >
-                <div className="h-8 w-8 rounded-full bg-slate-200 text-slate-700 text-[11px] font-semibold flex items-center justify-center shrink-0">
-                  {row.displayName.slice(0, 2).toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1 pt-0.5 overflow-hidden">
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="font-semibold text-[13px] text-slate-900 truncate">{row.displayName}</span>
-                    <span className="text-[11px] text-slate-400 shrink-0 whitespace-nowrap">
-                      {formatConversationTimestamp(row.latestMessageAt)}
-                    </span>
+            {rows.map((row) => {
+              const key = customerThreadRowStableKey(row);
+              const selected = customersSelectionsEqual(customersSelection, customersSelectionFromRow(row));
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => onSelectCustomersRow(row)}
+                  className={cn(
+                    'w-full text-left py-2 px-2 rounded-lg transition-colors flex items-start gap-2',
+                    selected ? 'bg-emerald-50/90' : 'bg-white hover:bg-slate-50/80'
+                  )}
+                >
+                  <div className="h-8 w-8 rounded-full bg-slate-200 text-slate-700 text-[11px] font-semibold flex items-center justify-center shrink-0">
+                    {rowInitials(row)}
                   </div>
-                  <div className="mt-1 min-w-0 overflow-hidden">
-                    <p className="text-[12px] text-slate-600 truncate leading-snug">
-                      {row.latestPreview ?? 'No preview'}
-                    </p>
-                  </div>
-                  <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-                    {row.channels.map((channel) => (
-                      <ChannelIndicator key={channel} channel={channel} />
-                    ))}
-                    {row.hasUnread && (
-                      <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 px-1.5 py-0.5 text-[10px] font-medium">
-                        Unread
+                  <div className="min-w-0 flex-1 pt-0.5 overflow-hidden">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="font-semibold text-[13px] text-slate-900 truncate">{rowTitle(row)}</span>
+                      <span className="text-[11px] text-slate-400 shrink-0 whitespace-nowrap">
+                        {formatConversationTimestamp(row.latestMessageAt)}
                       </span>
-                    )}
+                    </div>
+                    <div className="mt-1 min-w-0 overflow-hidden">
+                      <p className="text-[12px] text-slate-600 truncate leading-snug">
+                        {row.latestPreview ?? 'No preview'}
+                      </p>
+                    </div>
+                    <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                      {row.channels.map((channel) => (
+                        <ChannelIndicator key={channel} channel={channel} />
+                      ))}
+                      {row.kind === 'unlinked' && (
+                        <InboxStatusBadge variant="unlinked">Unlinked</InboxStatusBadge>
+                      )}
+                      {row.hasUnread && (
+                        <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-800 px-1.5 py-0.5 text-[10px] font-medium">
+                          Unread
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </button>
-            ))}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
     </div>
   );
 };
-

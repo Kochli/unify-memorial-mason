@@ -76,6 +76,10 @@ export interface ConversationThreadProps {
   conditionalAutoScroll?: boolean;
   /** Changing this key forces scroll-to-bottom once (e.g., switching customers). */
   autoScrollResetKey?: string | null;
+  /** Customers-only refinement: show email subject in header row (instead of metaLine). */
+  showEmailSubjectInHeader?: boolean;
+  /** Customers-only refinement: override which reply channels are enabled. */
+  enabledReplyChannels?: Array<'email' | 'sms' | 'whatsapp'>;
 }
 
 function mostRecentInboundChannel(messages: InboxMessage[]): 'email' | 'sms' | 'whatsapp' | null {
@@ -173,6 +177,8 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
   conversationSubject = null,
   conditionalAutoScroll = false,
   autoScrollResetKey = null,
+  showEmailSubjectInHeader = false,
+  enabledReplyChannels = undefined,
 }) => {
   const isUnifiedMode = !!conversationIdByChannel;
   const allChannels = useMemo(() => ['email', 'sms', 'whatsapp'] as const, []);
@@ -232,13 +238,16 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
     });
   };
   const availableChannels = useMemo(() => {
+    if (enabledReplyChannels && enabledReplyChannels.length > 0) {
+      return enabledReplyChannels;
+    }
     if (conversationIdByChannel) {
       return (['email', 'sms', 'whatsapp'] as const).filter(
         (ch) => conversationIdByChannel[ch] != null
       );
     }
     return ['email', 'sms', 'whatsapp'] as const;
-  }, [conversationIdByChannel]);
+  }, [conversationIdByChannel, enabledReplyChannels]);
   const disabledChannels = useMemo(
     () => (allChannels.filter((channel) => !availableChannels.includes(channel))),
     [allChannels, availableChannels]
@@ -360,7 +369,14 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
           const showRaw = showAsHtml && rawHtmlMessageIds.has(message.id);
           const isClickable = readOnly && !!onMessageClick;
           const showReplyAction = isUnifiedMode && !!onReplyToMessage && !readOnly;
-          const metaLine = buildMetaLine(message);
+          const metaLine =
+            showEmailSubjectInHeader && message.channel === 'email' ? null : buildMetaLine(message);
+          const emailSubjectInHeader =
+            showEmailSubjectInHeader && message.channel === 'email'
+              ? message.subject?.trim()
+                ? message.subject.trim()
+                : '(No subject)'
+              : null;
           const senderName = isInbound
             ? participantName ?? message.from_handle
             : 'You';
@@ -411,6 +427,7 @@ export const ConversationThread: React.FC<ConversationThreadProps> = ({
               senderName={senderName}
               channel={message.channel}
               metaLine={metaLine}
+              emailSubjectInHeader={emailSubjectInHeader}
               timestamp={formatBubbleTimestamp(message.sent_at)}
               onReply={showReplyAction ? () => handleReplyClick(message) : undefined}
               onClick={isClickable ? () => onMessageClick(message) : undefined}

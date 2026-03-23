@@ -14,6 +14,7 @@ import {
 import type { CreateConversationPayload } from '../api/inboxConversations.api';
 import { syncGmail } from '../api/inboxGmail.api';
 import type { InboxConversation, ConversationFilters } from '../types/inbox.types';
+import { invalidateInboxThreadSummaries } from './useThreadSummary';
 
 export const inboxKeys = {
   all: ['inbox'] as const,
@@ -33,6 +34,8 @@ export const inboxKeys = {
       ['inbox', 'customerMessages', personId, conversationIds] as const,
     personTimeline: (personId: string, conversationIds: string[]) =>
       ['inbox', 'customerMessages', personId, conversationIds] as const,
+    unlinkedTimeline: (channel: string, handle: string) =>
+      ['inbox', 'messages', 'unlinkedTimeline', channel, handle] as const,
   },
   channels: {
     all: ['inbox', 'channels'] as const,
@@ -108,6 +111,7 @@ export function useCreateConversation() {
     mutationFn: (payload: CreateConversationPayload) => createConversation(payload),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: inboxKeys.all });
+      invalidateInboxThreadSummaries(queryClient);
       queryClient.setQueryData(inboxKeys.conversations.detail(data.id), data);
     },
   });
@@ -173,6 +177,7 @@ export function useMarkAsUnread() {
     onSettled: () => {
       // Invalidate all conversation list queries to resync with server
       queryClient.invalidateQueries({ queryKey: inboxKeys.all });
+      invalidateInboxThreadSummaries(queryClient);
     },
   });
 }
@@ -185,6 +190,7 @@ export function useArchiveConversations() {
     onSuccess: () => {
       // Invalidate all conversation list queries
       queryClient.invalidateQueries({ queryKey: inboxKeys.all });
+      invalidateInboxThreadSummaries(queryClient);
     },
   });
 }
@@ -201,6 +207,7 @@ export function useDeleteConversations() {
         queryClient.removeQueries({ queryKey: inboxKeys.conversations.detail(id) });
         queryClient.removeQueries({ queryKey: inboxKeys.messages.byConversation(id) });
       });
+      invalidateInboxThreadSummaries(queryClient);
     },
   });
 }
@@ -215,6 +222,7 @@ export function useSyncGmail() {
       queryClient.invalidateQueries({ queryKey: inboxKeys.all });
       // Invalidate message queries so the open conversation thread refetches
       queryClient.invalidateQueries({ queryKey: inboxKeys.messages.all });
+      invalidateInboxThreadSummaries(queryClient);
     },
   });
 }
@@ -228,6 +236,7 @@ export function useLinkConversation() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: inboxKeys.all });
       queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.detail(variables.conversationId) });
+      invalidateInboxThreadSummaries(queryClient);
     },
   });
 }
@@ -240,6 +249,7 @@ export function useUnlinkConversation() {
     onSuccess: (_, conversationId) => {
       queryClient.invalidateQueries({ queryKey: inboxKeys.all });
       queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.detail(conversationId) });
+      invalidateInboxThreadSummaries(queryClient);
     },
   });
 }

@@ -7,6 +7,7 @@ import {
   type ConnectWhatsAppParams,
 } from '../api/whatsappConnections.api';
 import { inboxKeys } from './useInboxConversations';
+import { invalidateInboxThreadSummaries } from './useThreadSummary';
 
 export const whatsappConnectionKeys = {
   connection: ['inbox', 'whatsapp-connection'] as const,
@@ -27,6 +28,7 @@ export function useWhatsAppConnect() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: whatsappConnectionKeys.connection });
       queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
+      invalidateInboxThreadSummaries(queryClient);
     },
   });
 }
@@ -39,6 +41,7 @@ export function useWhatsAppDisconnect() {
       queryClient.invalidateQueries({ queryKey: whatsappConnectionKeys.connection });
       queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
       queryClient.invalidateQueries({ queryKey: ['inbox', 'messages'] });
+      invalidateInboxThreadSummaries(queryClient);
     },
   });
 }

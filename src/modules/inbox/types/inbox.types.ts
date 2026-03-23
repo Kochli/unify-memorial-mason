@@ -79,20 +79,64 @@ export interface ConversationFilters {
   search?: string;
   person_id?: string | null;
   unlinked_only?: boolean;
+  /** Exact match on `primary_handle` (trimmed). Use with `unlinked_only` + `channel` for narrow unlinked timeline fetches. */
+  primary_handle_exact?: string;
 }
 
 export type InboxChannel = 'email' | 'sms' | 'whatsapp';
 
 export type ConversationIdByChannel = Record<InboxChannel, string | null>;
 
-export interface CustomerThreadRow {
-  personId: string;
-  displayName: string;
-  latestMessageAt: string | null;
-  latestPreview: string | null;
-  unreadCount: number;
-  hasUnread: boolean;
-  channels: InboxChannel[];
-  latestConversationIdByChannel: ConversationIdByChannel;
-  conversationIds: string[];
+/** Linked customer: real `person_id`. Unlinked pseudo-customer: exact `primary_handle` on one channel. */
+export type CustomerThreadRow =
+  | {
+      kind: 'linked';
+      personId: string;
+      displayName: string;
+      latestMessageAt: string | null;
+      latestPreview: string | null;
+      unreadCount: number;
+      hasUnread: boolean;
+      channels: InboxChannel[];
+      latestConversationIdByChannel: ConversationIdByChannel;
+      conversationIds: string[];
+    }
+  | {
+      kind: 'unlinked';
+      channel: InboxChannel;
+      /** Normalized (trimmed) handle; matches `inbox_conversations.primary_handle` for timeline queries. */
+      handle: string;
+      displayTitle: string;
+      latestMessageAt: string | null;
+      latestPreview: string | null;
+      unreadCount: number;
+      hasUnread: boolean;
+      channels: [InboxChannel];
+      latestConversationIdByChannel: ConversationIdByChannel;
+      conversationIds: string[];
+    };
+
+/** Customers-tab selection: linked person UUID or unlinked handle bucket. */
+export type CustomersSelection =
+  | { type: 'linked'; personId: string }
+  | { type: 'unlinked'; channel: InboxChannel; handle: string };
+
+export function customerThreadRowStableKey(row: CustomerThreadRow): string {
+  if (row.kind === 'linked') return `linked:${row.personId}`;
+  return `unlinked:${row.channel}:${encodeURIComponent(row.handle)}`;
+}
+
+export function customersSelectionFromRow(row: CustomerThreadRow): CustomersSelection {
+  if (row.kind === 'linked') return { type: 'linked', personId: row.personId };
+  return { type: 'unlinked', channel: row.channel, handle: row.handle };
+}
+
+export function customersSelectionsEqual(a: CustomersSelection | null, b: CustomersSelection | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.type !== b.type) return false;
+  if (a.type === 'linked' && b.type === 'linked') return a.personId === b.personId;
+  if (a.type === 'unlinked' && b.type === 'unlinked')
+    return a.channel === b.channel && a.handle === b.handle;
+  return false;
 }

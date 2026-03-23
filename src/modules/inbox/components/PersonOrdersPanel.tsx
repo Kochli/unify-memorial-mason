@@ -52,7 +52,7 @@ export const PersonOrdersPanel: React.FC<PersonOrdersPanelProps> = ({
       <div className="h-full flex flex-col min-h-0 overflow-hidden">
         <div className="flex-1 min-h-0 flex items-center justify-center p-4">
           <p className="text-center text-slate-500 text-sm">
-            Select a conversation to view order context
+            Order context is available when a linked customer is selected
           </p>
         </div>
       </div>

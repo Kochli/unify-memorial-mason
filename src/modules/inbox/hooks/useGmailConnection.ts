@@ -5,6 +5,7 @@ import {
   disconnectGmail,
 } from '../api/gmailConnections.api';
 import { inboxKeys } from './useInboxConversations';
+import { invalidateInboxThreadSummaries } from './useThreadSummary';
 
 export const gmailConnectionKeys = {
   active: ['inbox', 'gmail-connection'] as const,
@@ -38,6 +39,7 @@ export function useGmailDisconnect() {
       queryClient.invalidateQueries({ queryKey: gmailConnectionKeys.active });
       queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.all });
       queryClient.invalidateQueries({ queryKey: ['inbox', 'messages'] });
+      invalidateInboxThreadSummaries(queryClient);
     },
   });
 }

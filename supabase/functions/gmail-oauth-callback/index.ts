@@ -107,6 +107,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   const now = new Date().toISOString();
+  // Leave last_synced_at null until gmail-sync-now completes a successful run.
+  // Setting it to "now" on connect caused messages.list to use after:<connect_time>,
+  // permanently skipping the first inbound in threads that started before OAuth finished.
   const { error: insertError } = await supabase.from('gmail_connections').insert({
     user_id: userId,
     provider: 'google',
@@ -116,7 +119,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
     token_expires_at: tokenExpiresAt,
     scope: 'gmail.readonly gmail.send gmail.modify',
     status: 'active',
-    last_synced_at: now,
     created_at: now,
     updated_at: now,
   });

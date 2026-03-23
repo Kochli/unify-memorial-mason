@@ -9,12 +9,20 @@ const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Headers': '*',
 };
 
+/** Cap total listed IDs per sync to bound runtime (Gmail returns max 100 per page). */
+const MAX_MESSAGES_LISTED_PER_SYNC = 500;
+
 interface SyncBody {
   since?: string;
 }
 
 interface GmailMessageListResponse {
   messages?: Array<{ id: string; threadId?: string }>;
+  nextPageToken?: string;
+}
+
+interface GmailThreadResponse {
+  messages?: GmailMessageResponse[];
 }
 interface GmailMessageResponse {
   id: string;
@@ -124,29 +132,247 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const accessToken = tokenData.access_token;
 
   const body = (await req.json().catch(() => ({}))) as SyncBody;
-  const since = body.since ?? connection.last_synced_at ?? new Date().toISOString();
-  const sinceSec = Math.floor(new Date(since).getTime() / 1000);
   const queryParams = new URLSearchParams({
     labelIds: 'INBOX',
     maxResults: '100',
-    q: `after:${sinceSec}`,
   });
-
-  const listRes = await fetch(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages?${queryParams.toString()}`,
-    { headers: { Authorization: `Bearer ${accessToken}` } },
-  );
-  if (!listRes.ok) {
-    const errText = await listRes.text();
-    console.error('Gmail messages.list error', listRes.status, errText);
-    return new Response(JSON.stringify({ error: 'Failed to fetch Gmail messages' }), {
-      status: 502,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+  if (body.since) {
+    const sec = Math.floor(new Date(body.since).getTime() / 1000);
+    queryParams.set('q', `after:${sec}`);
+  } else if (connection.last_synced_at) {
+    const sec = Math.floor(new Date(connection.last_synced_at).getTime() / 1000);
+    queryParams.set('q', `after:${sec}`);
+  } else {
+    // First sync for this connection: do not use after:<oauth_time> (excludes pre-connect mail).
+    queryParams.set('q', 'newer_than:30d');
   }
-  const list = (await listRes.json()) as GmailMessageListResponse;
-  const messageIds = list.messages ?? [];
+
+  const listedMessages: Array<{ id: string; threadId?: string }> = [];
+  const seenListIds = new Set<string>();
+  let listPageToken: string | undefined;
+
+  do {
+    const pageParams = new URLSearchParams(queryParams);
+    if (listPageToken) pageParams.set('pageToken', listPageToken);
+
+    const listRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?${pageParams.toString()}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!listRes.ok) {
+      const errText = await listRes.text();
+      console.error('Gmail messages.list error', listRes.status, errText);
+      return new Response(JSON.stringify({ error: 'Failed to fetch Gmail messages' }), {
+        status: 502,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const list = (await listRes.json()) as GmailMessageListResponse;
+    for (const m of list.messages ?? []) {
+      if (seenListIds.has(m.id)) continue;
+      seenListIds.add(m.id);
+      listedMessages.push(m);
+    }
+    listPageToken = list.nextPageToken;
+    if (listedMessages.length >= MAX_MESSAGES_LISTED_PER_SYNC) break;
+  } while (listPageToken);
+
+  const messageIds = listedMessages;
   let synced = 0;
+  /** One full-thread import per Gmail thread per sync (list can return many rows for the same thread). */
+  const threadIdsExpandedThisRun = new Set<string>();
+
+  const extractEmail = (h: string) => (h.match(/<(.+?)>/) ?? [null, h.trim()])[1] ?? h.trim();
+
+  /** Inserts one Gmail message if not already stored. Returns true when a new row was inserted. */
+  async function ingestGmailMessage(message: GmailMessageResponse): Promise<boolean> {
+    const { data: recentMsgsDup } = await supabase
+      .from('inbox_messages')
+      .select('id, meta')
+      .eq('user_id', userId)
+      .eq('channel', 'email')
+      .limit(1000);
+    const duplicate = (recentMsgsDup ?? []).find(
+      (m: { meta?: { gmail?: { messageId?: string } } }) =>
+        (m.meta as { gmail?: { messageId?: string } } | null)?.gmail?.messageId === message.id,
+    );
+    if (duplicate) return false;
+
+    const headers = message.payload.headers;
+    const getHeader = (n: string) => headers.find((h) => h.name === n)?.value ?? '';
+    const fromHeader = getHeader('From');
+    const toHeader = getHeader('To');
+    const subjectHeader = getHeader('Subject');
+    const dateHeader = getHeader('Date');
+    const fromEmail = extractEmail(fromHeader);
+    const toEmail = extractEmail(toHeader);
+    // Store subject on inbox_messages for per-message UI (Customers tab). Use null for empty/missing.
+    const subject = subjectHeader.trim() ? subjectHeader.trim() : null;
+    const direction = fromEmail === userEmail ? 'outbound' : 'inbound';
+    const primaryHandle = direction === 'inbound' ? fromEmail : toEmail;
+    let sentAt: string;
+    try {
+      const d = new Date(dateHeader);
+      sentAt = !isNaN(d.getTime()) ? d.toISOString() : new Date(parseInt(message.internalDate)).toISOString();
+    } catch {
+      sentAt = new Date().toISOString();
+    }
+    let bodyText = extractBodyText(message.payload);
+    if (!bodyText) bodyText = message.snippet ?? '';
+
+    // Optional: diagnostic for one Gmail message (set GMAIL_DEBUG_MESSAGE_ID to message id).
+    const debugMessageId = Deno.env.get('GMAIL_DEBUG_MESSAGE_ID');
+    if (debugMessageId && message.id === debugMessageId) {
+      const payload = message.payload;
+      const getDbgHeader = (name: string) =>
+        payload.headers?.find((h: { name: string; value: string }) => h.name === name)?.value ?? '';
+      const partHeader = (part: { headers?: Array<{ name: string; value: string }> }, name: string) =>
+        part.headers?.find((h: { name: string; value: string }) => h.name === name)?.value ?? '';
+      const payloadWithMime = payload as { mimeType?: string; headers?: Array<{ name: string; value: string }> };
+      const payloadSummary = {
+        mimeType: payloadWithMime.mimeType,
+        hasPayloadBodyData: !!payload.body?.data,
+        contentTransferEncoding: getDbgHeader('Content-Transfer-Encoding'),
+        contentType: getDbgHeader('Content-Type'),
+        parts: payload.parts?.map((p: { mimeType?: string; body?: { data?: string }; parts?: unknown[]; headers?: Array<{ name: string; value: string }> }) => ({
+          mimeType: p.mimeType,
+          hasBodyData: !!p.body?.data,
+          contentType: partHeader(p, 'Content-Type'),
+          contentTransferEncoding: partHeader(p, 'Content-Transfer-Encoding'),
+          nestedCount: p.parts?.length ?? 0,
+          nested: p.parts?.map((n: unknown) => {
+            const np = n as { mimeType?: string; body?: { data?: string }; headers?: Array<{ name: string; value: string }> };
+            return {
+              mimeType: np.mimeType,
+              hasBodyData: !!np.body?.data,
+              contentType: partHeader(np, 'Content-Type'),
+              contentTransferEncoding: partHeader(np, 'Content-Transfer-Encoding'),
+            };
+          }),
+        })),
+      };
+      const branch = getExtractBodyTextBranch(payload);
+      const { data: recentForDebug } = await supabase
+        .from('inbox_messages')
+        .select('id, body_text, created_at, meta')
+        .eq('user_id', userId)
+        .eq('channel', 'email')
+        .limit(500);
+      const existingRow = (recentForDebug ?? []).find(
+        (r: { meta?: unknown }) => (r.meta as { gmail?: { messageId?: string } } | null)?.gmail?.messageId === message.id,
+      );
+      const stored = existingRow
+        ? {
+            id: (existingRow as { id: string }).id,
+            body_text: (existingRow as { body_text?: string }).body_text,
+            created_at: (existingRow as { created_at?: string }).created_at,
+          }
+        : null;
+      const report = {
+        investigation: 'gmail-georgian-message-mime',
+        messageId: message.id,
+        threadId: message.threadId,
+        payloadSummary,
+        extractBodyTextBranch: branch,
+        bodyTextLength: bodyText.length,
+        bodyTextFromSnippet: bodyText === (message.snippet ?? ''),
+        snippetLength: (message.snippet ?? '').length,
+        stored: stored
+          ? {
+              rowId: stored.id,
+              storedBodyTextLength: (stored.body_text ?? '').length,
+              created_at: stored.created_at,
+              storedMatchesCurrentBody: stored.body_text === bodyText,
+              storedMatchesSnippet: stored.body_text === (message.snippet ?? ''),
+              note: 'If storedMatchesCurrentBody is false and row exists, row may be from before current sync run (duplicate skip) or from different extraction.',
+            }
+          : null,
+      };
+      console.log(JSON.stringify(report, null, 2));
+    }
+
+    const { data: existingMsgs } = await supabase
+      .from('inbox_messages')
+      .select('conversation_id, meta')
+      .eq('user_id', userId)
+      .eq('channel', 'email')
+      .limit(1000);
+    const byThread = (existingMsgs ?? []).find(
+      (m: { meta?: { gmail?: { threadId?: string } }; conversation_id: string }) =>
+        (m.meta as { gmail?: { threadId?: string } } | null)?.gmail?.threadId === message.threadId,
+    );
+    let conversationId: string;
+    if (byThread) {
+      conversationId = (byThread as { conversation_id: string }).conversation_id;
+    } else {
+      const { data: newConv, error: convErr } = await supabase
+        .from('inbox_conversations')
+        .insert({
+          user_id: userId,
+          channel: 'email',
+          primary_handle: primaryHandle,
+          subject,
+          status: 'open',
+          unread_count: direction === 'inbound' ? 1 : 0,
+          last_message_at: sentAt,
+          last_message_preview: bodyText.slice(0, 120),
+        })
+        .select('id')
+        .single();
+      if (convErr || !newConv) {
+        console.error('Create conversation', convErr);
+        return false;
+      }
+      conversationId = newConv.id;
+    }
+
+    try {
+      await attemptAutoLink(supabase, conversationId, 'email', primaryHandle);
+    } catch (e) {
+      console.error('gmail-sync-now: auto-link failed', e);
+    }
+
+    const { error: insertErr } = await supabase.from('inbox_messages').insert({
+      user_id: userId,
+      gmail_connection_id: gmailConnectionId,
+      conversation_id: conversationId,
+      channel: 'email',
+      direction,
+      from_handle: fromEmail,
+      to_handle: toEmail,
+      subject,
+      body_text: bodyText,
+      sent_at: sentAt,
+      status: 'sent',
+      meta: { gmail: { messageId: message.id, threadId: message.threadId } },
+    });
+    if (insertErr) {
+      console.error('Insert message', insertErr);
+      return false;
+    }
+
+    const { data: conv } = await supabase
+      .from('inbox_conversations')
+      .select('last_message_at, unread_count, status')
+      .eq('id', conversationId)
+      .single();
+    if (conv) {
+      const update: Record<string, unknown> = {};
+      const lastAt = conv.last_message_at ? new Date(conv.last_message_at).getTime() : 0;
+      const msgAt = new Date(sentAt).getTime();
+      if (msgAt >= lastAt) {
+        update.last_message_at = sentAt;
+        update.last_message_preview = bodyText.slice(0, 120);
+      }
+      if (direction === 'inbound' && conv.status === 'open') {
+        update.unread_count = (conv.unread_count ?? 0) + 1;
+      }
+      if (Object.keys(update).length > 0) {
+        await supabase.from('inbox_conversations').update(update).eq('id', conversationId);
+      }
+    }
+    return true;
+  }
 
   for (const { id: messageId } of messageIds) {
     try {
@@ -156,184 +382,30 @@ Deno.serve(async (req: Request): Promise<Response> => {
       );
       if (!msgRes.ok) continue;
       const message = (await msgRes.json()) as GmailMessageResponse;
-      const headers = message.payload.headers;
-      const getHeader = (n: string) => headers.find((h) => h.name === n)?.value ?? '';
-      const fromHeader = getHeader('From');
-      const toHeader = getHeader('To');
-      const subjectHeader = getHeader('Subject');
-      const dateHeader = getHeader('Date');
-      const extractEmail = (h: string) => (h.match(/<(.+?)>/) ?? [null, h.trim()])[1] ?? h.trim();
-      const fromEmail = extractEmail(fromHeader);
-      const toEmail = extractEmail(toHeader);
-      const subject = subjectHeader || '(no subject)';
-      const direction = fromEmail === userEmail ? 'outbound' : 'inbound';
-      const primaryHandle = direction === 'inbound' ? fromEmail : toEmail;
-      let sentAt: string;
-      try {
-        const d = new Date(dateHeader);
-        sentAt = !isNaN(d.getTime()) ? d.toISOString() : new Date(parseInt(message.internalDate)).toISOString();
-      } catch {
-        sentAt = new Date().toISOString();
-      }
-      let bodyText = extractBodyText(message.payload);
-      if (!bodyText) bodyText = message.snippet ?? '';
 
-      // Optional: diagnostic for one Gmail message (set GMAIL_DEBUG_MESSAGE_ID to message id).
-      const debugMessageId = Deno.env.get('GMAIL_DEBUG_MESSAGE_ID');
-      if (debugMessageId && message.id === debugMessageId) {
-        const payload = message.payload;
-        const getHeader = (name: string) =>
-          payload.headers?.find((h: { name: string; value: string }) => h.name === name)?.value ?? '';
-        const partHeader = (part: { headers?: Array<{ name: string; value: string }> }, name: string) =>
-          part.headers?.find((h: { name: string; value: string }) => h.name === name)?.value ?? '';
-        const payloadWithMime = payload as { mimeType?: string; headers?: Array<{ name: string; value: string }> };
-        const payloadSummary = {
-          mimeType: payloadWithMime.mimeType,
-          hasPayloadBodyData: !!payload.body?.data,
-          contentTransferEncoding: getHeader('Content-Transfer-Encoding'),
-          contentType: getHeader('Content-Type'),
-          parts: payload.parts?.map((p: { mimeType?: string; body?: { data?: string }; parts?: unknown[]; headers?: Array<{ name: string; value: string }> }) => ({
-            mimeType: p.mimeType,
-            hasBodyData: !!p.body?.data,
-            contentType: partHeader(p, 'Content-Type'),
-            contentTransferEncoding: partHeader(p, 'Content-Transfer-Encoding'),
-            nestedCount: p.parts?.length ?? 0,
-            nested: p.parts?.map((n: unknown) => {
-              const np = n as { mimeType?: string; body?: { data?: string }; headers?: Array<{ name: string; value: string }> };
-              return {
-                mimeType: np.mimeType,
-                hasBodyData: !!np.body?.data,
-                contentType: partHeader(np, 'Content-Type'),
-                contentTransferEncoding: partHeader(np, 'Content-Transfer-Encoding'),
-              };
-            }),
-          })),
-        };
-        const branch = getExtractBodyTextBranch(payload);
-        const { data: recentForDebug } = await supabase
-          .from('inbox_messages')
-          .select('id, body_text, created_at, meta')
-          .eq('user_id', userId)
-          .eq('channel', 'email')
-          .limit(500);
-        const existingRow = (recentForDebug ?? []).find(
-          (r: { meta?: unknown }) => (r.meta as { gmail?: { messageId?: string } } | null)?.gmail?.messageId === message.id
-        );
-        const stored = existingRow
-          ? {
-              id: (existingRow as { id: string }).id,
-              body_text: (existingRow as { body_text?: string }).body_text,
-              created_at: (existingRow as { created_at?: string }).created_at,
-            }
-          : null;
-        const report = {
-          investigation: 'gmail-georgian-message-mime',
-          messageId: message.id,
-          threadId: message.threadId,
-          payloadSummary,
-          extractBodyTextBranch: branch,
-          bodyTextLength: bodyText.length,
-          bodyTextFromSnippet: bodyText === (message.snippet ?? ''),
-          snippetLength: (message.snippet ?? '').length,
-          stored: stored
-            ? {
-                rowId: stored.id,
-                storedBodyTextLength: (stored.body_text ?? '').length,
-                created_at: stored.created_at,
-                storedMatchesCurrentBody: stored.body_text === bodyText,
-                storedMatchesSnippet: stored.body_text === (message.snippet ?? ''),
-                note: 'If storedMatchesCurrentBody is false and row exists, row may be from before current sync run (duplicate skip) or from different extraction.',
-              }
-            : null,
-        };
-        console.log(JSON.stringify(report, null, 2));
-      }
-
-      const { data: existingMsgs } = await supabase
-        .from('inbox_messages')
-        .select('conversation_id, meta')
-        .eq('user_id', userId)
-        .eq('channel', 'email')
-        .limit(1000);
-      const byThread = (existingMsgs ?? []).find((m: { meta?: { gmail?: { threadId?: string } }; conversation_id: string }) => (m.meta as { gmail?: { threadId?: string } } | null)?.gmail?.threadId === message.threadId);
-      let conversationId: string;
-      if (byThread) {
-        conversationId = (byThread as { conversation_id: string }).conversation_id;
-      } else {
-        const { data: newConv, error: convErr } = await supabase
-          .from('inbox_conversations')
-          .insert({
-            user_id: userId,
-            channel: 'email',
-            primary_handle: primaryHandle,
-            subject,
-            status: 'open',
-            unread_count: direction === 'inbound' ? 1 : 0,
-            last_message_at: sentAt,
-            last_message_preview: bodyText.slice(0, 120),
-          })
-          .select('id')
-          .single();
-        if (convErr || !newConv) {
-          console.error('Create conversation', convErr);
-          continue;
-        }
-        conversationId = newConv.id;
-      }
-
-      // Auto-link conversation to People (customers) by strict email match
-      try {
-        await attemptAutoLink(supabase, conversationId, 'email', primaryHandle);
-      } catch (e) {
-        console.error('gmail-sync-now: auto-link failed', e);
-      }
-
-      const { data: recentMsgs } = await supabase
-        .from('inbox_messages')
-        .select('id, meta')
-        .eq('user_id', userId)
-        .eq('channel', 'email')
-        .limit(1000);
-      const duplicate = (recentMsgs ?? []).find((m: { meta?: { gmail?: { messageId?: string } } }) => (m.meta as { gmail?: { messageId?: string } } | null)?.gmail?.messageId === message.id);
-      if (duplicate) continue;
-
-      const { error: insertErr } = await supabase.from('inbox_messages').insert({
-        user_id: userId,
-        gmail_connection_id: gmailConnectionId,
-        conversation_id: conversationId,
-        channel: 'email',
-        direction,
-        from_handle: fromEmail,
-        to_handle: toEmail,
-        body_text: bodyText,
-        sent_at: sentAt,
-        status: 'sent',
-        meta: { gmail: { messageId: message.id, threadId: message.threadId } },
-      });
-      if (insertErr) {
-        console.error('Insert message', insertErr);
+      if (threadIdsExpandedThisRun.has(message.threadId)) {
         continue;
       }
-      synced++;
+      threadIdsExpandedThisRun.add(message.threadId);
 
-      const { data: conv } = await supabase
-        .from('inbox_conversations')
-        .select('last_message_at, unread_count, status')
-        .eq('id', conversationId)
-        .single();
-      if (conv) {
-        const update: Record<string, unknown> = {};
-        const lastAt = conv.last_message_at ? new Date(conv.last_message_at).getTime() : 0;
-        const msgAt = new Date(sentAt).getTime();
-        if (msgAt >= lastAt) {
-          update.last_message_at = sentAt;
-          update.last_message_preview = bodyText.slice(0, 120);
-        }
-        if (direction === 'inbound' && conv.status === 'open')
-          update.unread_count = (conv.unread_count ?? 0) + 1;
-        if (Object.keys(update).length > 0) {
-          await supabase.from('inbox_conversations').update(update).eq('id', conversationId);
-        }
+      // Always fetch the full thread. Incremental messages.list can omit older messages (after:,
+      // INBOX-only, maxResults, newer_than) even when a newer in-thread message matches; the prior
+      // !byThread-only expansion never backfilled once any message from the thread existed in DB.
+      let batch: GmailMessageResponse[];
+      const threadRes = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(message.threadId)}?format=full`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      if (threadRes.ok) {
+        const threadJson = (await threadRes.json()) as GmailThreadResponse;
+        const msgs = threadJson.messages ?? [];
+        batch = msgs.slice().sort((a, b) => parseInt(a.internalDate, 10) - parseInt(b.internalDate, 10));
+      } else {
+        batch = [message];
+      }
+
+      for (const msg of batch) {
+        if (await ingestGmailMessage(msg)) synced += 1;
       }
     } catch (e) {
       console.error('Process message', messageId, e);

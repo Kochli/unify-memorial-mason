@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import { fetchMessagesByConversation, fetchMessagesByConversationIds } from '../api/inboxMessages.api';
 import { fetchConversations } from '../api/inboxConversations.api';
 import { inboxKeys } from './useInboxConversations';
+import { invalidateInboxThreadSummaries } from './useThreadSummary';
 import { sendTwilioMessage } from '../api/inboxTwilio.api';
 import { sendGmailReply, sendGmailFirstMessage } from '../api/inboxGmail.api';
 import { sendSmsReply } from '../api/inboxSms.api';
@@ -71,6 +72,69 @@ export function usePersonUnifiedTimeline(personId: string | null): {
 /** Semantic alias for customer-centric mode. */
 export function useCustomerMessages(personId: string | null) {
   return usePersonUnifiedTimeline(personId);
+}
+
+/** Open unlinked conversations for one exact handle + channel; unified message timeline (chronological). */
+export function useUnlinkedHandleTimeline(
+  channel: InboxChannel | null,
+  handle: string | null
+): {
+  messages: InboxMessage[];
+  isLoading: boolean;
+  isError: boolean;
+} {
+  const trimmed = handle?.trim() ?? '';
+  const enabled = !!channel && trimmed.length > 0;
+
+  const { data: conversations = [], isLoading: convLoading, isError: convError } = useQuery({
+    queryKey: inboxKeys.messages.unlinkedTimeline(channel ?? '', trimmed),
+    queryFn: () =>
+      fetchConversations({
+        status: 'open',
+        unlinked_only: true,
+        channel: channel!,
+        primary_handle_exact: trimmed,
+      }),
+    enabled,
+  });
+
+  const conversationIds = useMemo(
+    () => (conversations?.map((c) => c.id) ?? []).slice().sort(),
+    [conversations]
+  );
+
+  const {
+    data: messages = [],
+    isLoading: messagesLoading,
+    isError: messagesError,
+  } = useQuery({
+    queryKey: [...inboxKeys.messages.unlinkedTimeline(channel ?? '', trimmed), 'msgs', conversationIds] as const,
+    queryFn: () => fetchMessagesByConversationIds(conversationIds),
+    enabled: enabled && conversationIds.length > 0,
+  });
+
+  const sortedMessages = useMemo(() => {
+    if (!messages?.length) return [];
+    const byId = new Map<string, InboxMessage>();
+    messages.forEach((message) => {
+      byId.set(message.id, message);
+    });
+    return Array.from(byId.values()).sort((a, b) => {
+      const aSent = new Date(a.sent_at ?? a.created_at).getTime();
+      const bSent = new Date(b.sent_at ?? b.created_at).getTime();
+      if (aSent !== bSent) return aSent - bSent;
+      const aCreated = new Date(a.created_at).getTime();
+      const bCreated = new Date(b.created_at).getTime();
+      if (aCreated !== bCreated) return aCreated - bCreated;
+      return a.id.localeCompare(b.id);
+    });
+  }, [messages]);
+
+  return {
+    messages: sortedMessages,
+    isLoading: convLoading || (enabled && conversationIds.length > 0 && messagesLoading),
+    isError: convError || messagesError,
+  };
 }
 
 const CHANNEL_PRIORITY: InboxChannel[] = ['email', 'sms', 'whatsapp'];
@@ -170,6 +234,7 @@ export function useSendReply() {
       queryClient.invalidateQueries({ queryKey: inboxKeys.messages.byConversation(variables.conversationId) });
       // Invalidate all inbox query families so both modes update immediately.
       queryClient.invalidateQueries({ queryKey: inboxKeys.all });
+      invalidateInboxThreadSummaries(queryClient);
       // Invalidate conversation detail
       queryClient.invalidateQueries({ queryKey: inboxKeys.conversations.detail(variables.conversationId) });
     },

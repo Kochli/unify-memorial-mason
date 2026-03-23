@@ -36,6 +36,10 @@ export async function fetchConversations(filters?: ConversationFilters) {
     query = query.is('person_id', null);
   }
 
+  if (filters?.primary_handle_exact != null && filters.primary_handle_exact.trim() !== '') {
+    query = query.eq('primary_handle', filters.primary_handle_exact.trim());
+  }
+
   // Search: ILIKE over primary_handle, subject, last_message_preview
   if (filters?.search && filters.search.trim()) {
     const searchTerm = filters.search.trim();

@@ -76,23 +76,27 @@ export const EditOrderDrawer: React.FC<EditOrderDrawerProps> = ({
   const findMatchingProduct = (o: Order, productList: UIProduct[]): string => {
     // Never throw; always return a safe productId string.
     try {
-      // 1) Priority: match by order.value -> product.price
-      if (o.value != null && Number.isFinite(o.value)) {
-        const target = o.value;
-        const tolerance = 0.0001;
-        const byPrice = productList.find((p) => {
-          if (p.price == null || !Number.isFinite(p.price)) return false;
-          return Math.abs(p.price - target) <= tolerance;
-        });
-        if (byPrice?.id) return byPrice.id;
-      }
-
-      // 2) Fallback: match by stored product photo URL -> product.imageUrl
+      // 1) Priority: match by stored product photo URL -> product.imageUrl
       if (o.product_photo_url) {
         const byImageUrl = productList.find(
           (p) => p.imageUrl && p.imageUrl === o.product_photo_url
         );
         if (byImageUrl?.id) return byImageUrl.id;
+      }
+
+      // 2) Fallback: match by order.value -> product.price (normalized, finite only)
+      if (o.value != null) {
+        const orderValue = Number(o.value);
+        if (Number.isFinite(orderValue)) {
+          const tolerance = 0.0001;
+          const byPrice = productList.find((p) => {
+            if (p.price == null) return false;
+            const productPrice = Number(p.price);
+            if (!Number.isFinite(productPrice)) return false;
+            return Math.abs(productPrice - orderValue) <= tolerance;
+          });
+          if (byPrice?.id) return byPrice.id;
+        }
       }
     } catch {
       // Intentionally ignore matching errors; drawer should still open safely.

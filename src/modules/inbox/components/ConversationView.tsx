@@ -7,7 +7,9 @@ import { useOrdersByPersonId } from '@/modules/orders/hooks/useOrders';
 import { getOrderDisplayId } from '@/modules/orders/utils/orderDisplayId';
 import { LinkConversationModal } from './LinkConversationModal';
 import { ConversationHeader } from './ConversationHeader';
+import { ConversationSummaryBanner } from './ConversationSummaryBanner';
 import { ConversationThread } from './ConversationThread';
+import { useThreadSummary } from '@/modules/inbox/hooks/useThreadSummary';
 
 const HEADER_ORDERS_MAX = 5;
 function formatOrderIdsForHeader(orderIds: string[], max: number = HEADER_ORDERS_MAX): string {
@@ -33,6 +35,10 @@ export const ConversationView: React.FC<ConversationViewProps> = ({
   const { data: messages = [] } = useMessagesByConversation(conversationId);
   const { data: person } = useCustomer(conversation?.person_id ?? '');
   const { data: personOrders = [] } = useOrdersByPersonId(conversation?.person_id ?? '');
+  const threadSummary = useThreadSummary({
+    scope: 'conversation',
+    conversationId: conversationId ?? null,
+  });
 
   if (!conversationId || !conversation) {
     return (
@@ -63,6 +69,15 @@ export const ConversationView: React.FC<ConversationViewProps> = ({
   const relatedOrderIds = personOrders.map(getOrderDisplayId);
   const orderDisplayIdsText = relatedOrderIds.length > 0 ? formatOrderIdsForHeader(relatedOrderIds) : null;
 
+  const summaryBannerBusy =
+    threadSummary.isLoading ||
+    (threadSummary.isFetching && !threadSummary.summary?.trim());
+
+  const showSummarySlot =
+    summaryBannerBusy ||
+    threadSummary.error != null ||
+    !!(threadSummary.summary && threadSummary.summary.trim());
+
   return (
     <div className="flex-1 min-h-0 flex flex-col min-w-0 overflow-hidden">
       <LinkConversationModal
@@ -77,14 +92,23 @@ export const ConversationView: React.FC<ConversationViewProps> = ({
 
       <div className="shrink-0">
         <ConversationHeader
-        displayName={personDisplay ?? conversation.primary_handle}
-        handleLine={handleLine}
-        subjectLine={subject}
-        linkStateLabel={linkStateLabel}
-        orderDisplayIdsText={orderDisplayIdsText}
-        actionButtonLabel={isUnlinked ? 'Link person' : 'Change link'}
-        onActionClick={() => setLinkModalOpen(true)}
-      />
+          displayName={personDisplay ?? conversation.primary_handle}
+          handleLine={handleLine}
+          subjectLine={subject}
+          linkStateLabel={linkStateLabel}
+          orderDisplayIdsText={orderDisplayIdsText}
+          actionButtonLabel={isUnlinked ? 'Link person' : 'Change link'}
+          onActionClick={() => setLinkModalOpen(true)}
+          summarySlot={
+            showSummarySlot ? (
+              <ConversationSummaryBanner
+                summary={threadSummary.summary}
+                isLoading={summaryBannerBusy}
+                error={threadSummary.error}
+              />
+            ) : undefined
+          }
+        />
       </div>
 
       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">

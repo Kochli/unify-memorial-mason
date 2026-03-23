@@ -23,9 +23,15 @@ import {
 import { NewConversationModal, type NewConversationResult } from "@/modules/inbox/components/NewConversationModal";
 import { useGmailConnection } from "@/modules/inbox/hooks/useGmailConnection";
 import { gmailConnectionKeys } from "@/modules/inbox/hooks/useGmailConnection";
-import type { ConversationFilters } from "@/modules/inbox/types/inbox.types";
+import type { ConversationFilters, CustomersSelection } from "@/modules/inbox/types/inbox.types";
+import {
+  customersSelectionsEqual,
+  customersSelectionFromRow,
+  customerThreadRowStableKey,
+} from "@/modules/inbox/types/inbox.types";
 import { cn } from "@/shared/lib/utils";
 import { useCustomerThreads } from '../hooks/useCustomerThreads';
+import { invalidateInboxThreadSummaries } from '@/modules/inbox/hooks/useThreadSummary';
 
 const REALTIME_DEBOUNCE_MS = 200;
 const GMAIL_POLL_INTERVAL_MS = 10_000;
@@ -40,7 +46,7 @@ export const UnifiedInboxPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
-  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
+  const [customersSelection, setCustomersSelection] = useState<CustomersSelection | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [newConversationModalOpen, setNewConversationModalOpen] = useState(false);
   const autoReadOnceRef = useRef<Set<string>>(new Set());
@@ -118,7 +124,11 @@ export const UnifiedInboxPage: React.FC = () => {
 
   const { data: selectedConversation } = useConversation(selectedConversationId);
   const activePersonId = (
-    viewMode === 'customers' ? selectedPersonId : selectedConversation?.person_id ?? null
+    viewMode === 'customers'
+      ? customersSelection?.type === 'linked'
+        ? customersSelection.personId
+        : null
+      : selectedConversation?.person_id ?? null
   ) as string | null;
 
   useEffect(() => {
@@ -156,6 +166,16 @@ export const UnifiedInboxPage: React.FC = () => {
     channelFilter,
     listFilter,
   });
+
+  const selectedCustomersRow = useMemo(() => {
+    if (!customersSelection) return null;
+    return (
+      customerRows.find((r) =>
+        customersSelectionsEqual(customersSelectionFromRow(r), customersSelection)
+      ) ?? null
+    );
+  }, [customerRows, customersSelection]);
+
   const createConversationMutation = useCreateConversation();
   const markAsReadMutation = useMarkAsRead();
   const markAsUnreadMutation = useMarkAsUnread();
@@ -173,6 +193,7 @@ export const UnifiedInboxPage: React.FC = () => {
       invalidateInFlightRef.current = true;
       try {
         await queryClient.invalidateQueries({ queryKey: inboxKeys.all });
+        invalidateInboxThreadSummaries(queryClient);
       } finally {
         invalidateInFlightRef.current = false;
       }
@@ -237,39 +258,44 @@ export const UnifiedInboxPage: React.FC = () => {
     if (viewMode !== 'customers') return;
     if (customersLoading || customersError) return;
     if (customerRows.length === 0) {
-      setSelectedPersonId(null);
+      setCustomersSelection(null);
       return;
     }
-    if (!selectedPersonId) {
-      setSelectedPersonId(customerRows[0].personId);
+    if (!customersSelection) {
+      setCustomersSelection(customersSelectionFromRow(customerRows[0]));
       return;
     }
-    if (!customerRows.some((row) => row.personId === selectedPersonId)) {
-      setSelectedPersonId(customerRows[0].personId);
+    if (
+      !customerRows.some((row) =>
+        customersSelectionsEqual(customersSelectionFromRow(row), customersSelection)
+      )
+    ) {
+      setCustomersSelection(customersSelectionFromRow(customerRows[0]));
     }
-  }, [viewMode, customerRows, selectedPersonId, customersLoading, customersError]);
+  }, [viewMode, customerRows, customersSelection, customersLoading, customersError]);
 
-  // Customers mode: auto-mark all conversations for selected person as read on open.
+  // Customers mode: auto-mark all conversations for selected row as read on open.
   useEffect(() => {
     if (viewMode !== 'customers') return;
-    if (!selectedPersonId) return;
+    if (!selectedCustomersRow) return;
     if (markAsReadMutation.isPending) return;
-    const row = customerRows.find((item) => item.personId === selectedPersonId);
-    if (!row || !row.hasUnread || row.conversationIds.length === 0) return;
-    if (autoReadCustomersRef.current.has(selectedPersonId)) return;
+    const row = selectedCustomersRow;
+    if (!row.hasUnread || row.conversationIds.length === 0) return;
+    const stableKey = customerThreadRowStableKey(row);
+    if (autoReadCustomersRef.current.has(stableKey)) return;
 
-    autoReadCustomersRef.current.add(selectedPersonId);
+    autoReadCustomersRef.current.add(stableKey);
     markAsReadMutation.mutate(row.conversationIds, {
       onError: () => {
-        autoReadCustomersRef.current.delete(selectedPersonId);
+        autoReadCustomersRef.current.delete(stableKey);
       },
     });
-  }, [viewMode, selectedPersonId, customerRows, markAsReadMutation]);
+  }, [viewMode, selectedCustomersRow, markAsReadMutation]);
 
-  // Allow re-auto-marking same customer when unread appears again later.
+  // Allow re-auto-marking same row when unread appears again later.
   useEffect(() => {
     customerRows.forEach((row) => {
-      if (row.hasUnread) autoReadCustomersRef.current.delete(row.personId);
+      if (row.hasUnread) autoReadCustomersRef.current.delete(customerThreadRowStableKey(row));
     });
   }, [customerRows]);
 
@@ -282,16 +308,14 @@ export const UnifiedInboxPage: React.FC = () => {
 
   const anyToggleTargetUnread = useMemo(() => {
     if (viewMode === 'customers') {
-      if (!selectedPersonId) return false;
-      const row = customerRows.find((item) => item.personId === selectedPersonId);
-      return row?.hasUnread ?? false;
+      return selectedCustomersRow?.hasUnread ?? false;
     }
     if (!toggleTargetIds.length) return false;
     return toggleTargetIds.some((id) => {
       const conversation = conversationsById.get(id);
       return conversation ? conversation.unread_count > 0 : false;
     });
-  }, [toggleTargetIds, conversationsById, viewMode, selectedPersonId, customerRows]);
+  }, [toggleTargetIds, conversationsById, viewMode, selectedCustomersRow]);
 
   const handleReplyChannelChange = (target: 'email' | 'sms' | 'whatsapp') => {
     if (!selectedConversationId || !allConversations) return;
@@ -433,9 +457,7 @@ export const UnifiedInboxPage: React.FC = () => {
 
   const handleToggleReadUnread = () => {
     const ids =
-      viewMode === 'customers'
-        ? (customerRows.find((item) => item.personId === selectedPersonId)?.conversationIds ?? [])
-        : toggleTargetIds;
+      viewMode === 'customers' ? (selectedCustomersRow?.conversationIds ?? []) : toggleTargetIds;
     if (ids.length === 0) return;
 
     const isMarkingRead = anyToggleTargetUnread;
@@ -649,19 +671,17 @@ export const UnifiedInboxPage: React.FC = () => {
                   onChannelFilterChange={setChannelFilter}
                   onSearchChange={setSearchQuery}
                   rows={customerRows}
-                  selectedPersonId={selectedPersonId}
-                  onSelectPerson={setSelectedPersonId}
+                  customersSelection={customersSelection}
+                  onSelectCustomersRow={(row) => setCustomersSelection(customersSelectionFromRow(row))}
                   isLoading={customersLoading}
                   isError={customersError}
                   onToggleReadUnreadClick={handleToggleReadUnread}
                   toggleReadUnreadDisabled={
-                    !selectedPersonId ||
+                    !selectedCustomersRow ||
                     markAsReadMutation.isPending ||
                     markAsUnreadMutation.isPending
                   }
-                  selectedHasUnread={
-                    customerRows.find((row) => row.personId === selectedPersonId)?.hasUnread ?? false
-                  }
+                  selectedHasUnread={selectedCustomersRow?.hasUnread ?? false}
                 />
               )}
             </div>
@@ -696,7 +716,7 @@ export const UnifiedInboxPage: React.FC = () => {
                 onReplyChannelChange={handleReplyChannelChange}
               />
             ) : (
-              <CustomerConversationView personId={selectedPersonId} />
+              <CustomerConversationView customersSelection={customersSelection} />
             )}
           </div>
 

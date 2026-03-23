@@ -11,6 +11,8 @@ export interface InboxMessageBubbleProps {
   channel?: 'email' | 'sms' | 'whatsapp' | null;
   /** Optional meta line (e.g. subject/from/to) shown secondary */
   metaLine?: string | null;
+  /** Optional email subject shown in the header row (after sender, before channel/time). */
+  emailSubjectInHeader?: string | null;
   /** Message body (or custom content for HTML) */
   children: React.ReactNode;
   /** Formatted timestamp */
@@ -29,6 +31,7 @@ export const InboxMessageBubble: React.FC<InboxMessageBubbleProps> = ({
   senderName,
   channel,
   metaLine,
+  emailSubjectInHeader,
   children,
   timestamp,
   onReply,
@@ -52,10 +55,20 @@ export const InboxMessageBubble: React.FC<InboxMessageBubbleProps> = ({
     >
       <div className={cn('min-w-0 max-w-[74%]')}>
         {/* Header row: sender name, channel badge, timestamp */}
-        <div className={cn('mb-1.5 flex items-center gap-2 min-w-0', isInbound ? 'pr-2' : 'pl-2')}>
+        <div
+          className={cn(
+            'mb-1.5 flex items-center gap-2 min-w-0',
+            isInbound ? 'pr-2' : 'pl-2'
+          )}
+        >
           <span className="text-[13px] font-semibold text-slate-800 truncate">
             {senderName || (isInbound ? 'Customer' : 'You')}
           </span>
+          {emailSubjectInHeader != null && (
+            <span className="flex-1 min-w-0 text-[11px] text-slate-600 whitespace-normal break-words leading-snug">
+              {emailSubjectInHeader}
+            </span>
+          )}
           {channelLabel && (
             <span className="inline-flex items-center gap-1 rounded-md bg-slate-200/70 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 shrink-0">
               {channelLabel}
