@@ -1,6 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.49.4';
-import { getUserFromRequest } from './auth.ts';
-import { logManagedConnectionEvent } from './whatsappConnectionEvents.ts';
+import { getUserFromRequest } from '../_shared/auth.ts';
+import { logManagedConnectionEvent } from '../_shared/whatsappConnectionEvents.ts';
 
 const corsHeaders: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -31,30 +31,29 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const { data: existing } = await supabase
     .from('whatsapp_managed_connections')
-    .select('id, status')
+    .select('id, state')
     .eq('user_id', user.id)
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (existing && existing.status === 'connected') {
+  if (existing && existing.state === 'connected') {
     return jsonResponse({ error: 'onboarding_already_connected' }, 409);
   }
 
   if (existing) {
-    if (existing.status === 'disconnected' || existing.status === 'failed') {
+    if (existing.state === 'disconnected' || existing.state === 'failed') {
       const { data: updated, error: updateErr } = await supabase
         .from('whatsapp_managed_connections')
         .update({
-          status: 'collecting_business_info',
-          status_reason_code: null,
-          status_reason_message: null,
-          onboarding_started_at: now,
+          state: 'collecting_business_info',
+          last_error: null,
+          last_state_change_at: now,
           disconnected_at: null,
           updated_at: now,
         })
         .eq('id', existing.id)
-        .select('id, status')
+        .select('id, state')
         .single();
       if (updateErr || !updated) return jsonResponse({ error: 'Failed to start onboarding' }, 500);
       await logManagedConnectionEvent(supabase, {
@@ -62,24 +61,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
         userId: user.id,
         actorType: 'user',
         eventType: 'managed_onboarding_started',
-        previousStatus: existing.status,
-        newStatus: updated.status,
+        previousStatus: existing.state,
+        newStatus: updated.state,
       });
-      return jsonResponse({ connection_id: updated.id, status: updated.status });
+      return jsonResponse({ connection_id: updated.id, status: updated.state });
     }
 
-    return jsonResponse({ connection_id: existing.id, status: existing.status });
+    return jsonResponse({ connection_id: existing.id, status: existing.state });
   }
 
   const { data: inserted, error } = await supabase
     .from('whatsapp_managed_connections')
     .insert({
       user_id: user.id,
-      status: 'collecting_business_info',
-      onboarding_started_at: now,
+      state: 'collecting_business_info',
+      last_state_change_at: now,
       updated_at: now,
     })
-    .select('id, status')
+    .select('id, state')
     .single();
   if (error || !inserted) return jsonResponse({ error: 'Failed to create managed connection' }, 500);
 
@@ -88,8 +87,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     userId: user.id,
     actorType: 'user',
     eventType: 'managed_onboarding_started',
-    newStatus: inserted.status,
+    newStatus: inserted.state,
   });
 
-  return jsonResponse({ connection_id: inserted.id, status: inserted.status });
+  return jsonResponse({ connection_id: inserted.id, status: inserted.state });
 });

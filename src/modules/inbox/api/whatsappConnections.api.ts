@@ -1,9 +1,34 @@
 import { supabase } from '@/shared/lib/supabase';
+const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
 function extractInvokeErrorMessage(error: unknown): string | null {
   if (!error || typeof error !== 'object') return null;
   const maybeMessage = (error as { message?: unknown }).message;
   return typeof maybeMessage === 'string' ? maybeMessage : null;
+}
+
+async function getValidAccessToken(): Promise<string> {
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+  if (userError || !user) throw new Error('You must be signed in');
+
+  let {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  // Force one refresh pass for managed endpoints to avoid stale/hydration-race JWTs.
+  const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+  if (!refreshError && refreshed.session?.access_token) {
+    session = refreshed.session;
+  }
+
+  if (!session?.access_token) {
+    throw new Error('You must be signed in');
+  }
+
+  return session.access_token;
 }
 
 export interface WhatsAppConnection {
@@ -157,15 +182,15 @@ export async function connectWhatsApp(params: ConnectWhatsAppParams): Promise<{ 
 }
 
 export async function startManagedWhatsAppOnboarding(): Promise<{ connection_id: string; status: string }> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (!session?.access_token) throw new Error('You must be signed in');
+  const accessToken = await getValidAccessToken();
 
   const { data, error } = await supabase.functions.invoke<{ connection_id: string; status: string; error?: string }>(
     'whatsapp-managed-start',
     {
-      headers: { Authorization: `Bearer ${session.access_token}` },
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        ...(anonKey ? { apikey: anonKey } : {}),
+      },
       body: {},
     },
   );
@@ -178,10 +203,7 @@ export async function startManagedWhatsAppOnboarding(): Promise<{ connection_id:
 export async function submitManagedWhatsAppBusiness(
   params: ManagedSubmitBusinessParams,
 ): Promise<{ connection_id: string; status: string; next_check_after_seconds: number }> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (!session?.access_token) throw new Error('You must be signed in');
+  const accessToken = await getValidAccessToken();
 
   const { data, error } = await supabase.functions.invoke<{
     connection_id: string;
@@ -189,7 +211,10 @@ export async function submitManagedWhatsAppBusiness(
     next_check_after_seconds: number;
     error?: string;
   }>('whatsapp-managed-submit-business', {
-    headers: { Authorization: `Bearer ${session.access_token}` },
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      ...(anonKey ? { apikey: anonKey } : {}),
+    },
     body: params,
   });
   if (error) throw new Error(extractInvokeErrorMessage(error) ?? 'Failed to submit managed details');
@@ -199,14 +224,14 @@ export async function submitManagedWhatsAppBusiness(
 }
 
 export async function fetchManagedWhatsAppStatus(): Promise<ManagedWhatsAppStatusResponse> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  if (!session?.access_token) throw new Error('You must be signed in');
+  const accessToken = await getValidAccessToken();
 
   const { data, error } = await supabase.functions.invoke<ManagedWhatsAppStatusResponse>('whatsapp-managed-status', {
     method: 'GET',
-    headers: { Authorization: `Bearer ${session.access_token}` },
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      ...(anonKey ? { apikey: anonKey } : {}),
+    },
   });
   if (error) throw new Error(extractInvokeErrorMessage(error) ?? 'Failed to fetch managed status');
   return data as ManagedWhatsAppStatusResponse;
